@@ -59,6 +59,13 @@ class ResCompany(models.Model):
         help="General journal used to post wallet transfers / penalties for CarAm rides.",
     )
 
+    caram_clearing_journal_id = fields.Many2one(
+        "account.journal",
+        string="CarAm Clearing Journal",
+        domain="[('type', '=', 'general')]",
+        help="General journal used to post wallet clearing entries for CarAm rides.",
+    )
+
     caram_commission_product_id = fields.Many2one(
         "product.product",
         string="Commission Product",
@@ -112,6 +119,11 @@ class ResConfigSettings(models.TransientModel):
 
     caram_wallet_journal_id = fields.Many2one(
         related="company_id.caram_wallet_journal_id",
+        readonly=False,
+    )
+    
+    caram_clearing_journal_id = fields.Many2one(
+        related="company_id.caram_clearing_journal_id",
         readonly=False,
     )
 
