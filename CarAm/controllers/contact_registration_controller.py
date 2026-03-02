@@ -72,12 +72,18 @@ class ContactRegistrationController(http.Controller):
         return bank_account, liability_account, None
 
 
-    def create_driver_coupon_credit_note(self, env, company_id, partner, amount):
-        """Create & post a customer credit note to represent the welcome coupon."""
-        product_coupon = env['product.product'].sudo().with_company(company_id).search(
-            [('is_coupon', '=', True)],
-            limit=1,
-        )
+    def create_driver_coupon_credit_note(self, env, company_id, partner, amount, product=None):
+        """Create & post a customer credit note.
+
+        If a product is provided, it will be used directly (e.g. compensation product);
+        otherwise, the legacy 'is_coupon' product will be searched.
+        """
+        product_coupon = product
+        if not product_coupon:
+            product_coupon = env['product.product'].sudo().with_company(company_id).search(
+                [('is_coupon', '=', True)],
+                limit=1,
+            )
         if not product_coupon:
             return False
 
@@ -557,6 +563,136 @@ class ContactRegistrationController(http.Controller):
         except Exception as e:
             return request.make_json_response({"error": f"Failed to create withdrawal transaction: {str(e)}"}, status=500)
 
+
+    @http.route("/api/compensation", type="http", auth="none", methods=["POST"], csrf=False)
+    def wallet_compensation(self, **kw):
+        try:
+            payload = json.loads(request.httprequest.data.decode("utf-8"))
+
+            user = self._authenticate()
+            env = self._get_env(user)
+            company = user.company_id
+            company_id = company.id
+
+            odoo_partner_id = payload.get("odoo_partner_id")
+            comp_type = (payload.get("type") or "").strip().lower()
+            amount = payload.get("amount")
+
+            # -------------------- Validate input --------------------
+            if not amount:
+                return request.make_json_response({"error": "amount is required"}, status=400)
+
+            if not odoo_partner_id:
+                return request.make_json_response(
+                    {"status": 400, "message": "odoo_partner_id is required"}, status=400
+                )
+
+            if comp_type not in ["bonus", "discount"]:
+                return request.make_json_response(
+                    {"status": 400, "message": "Invalid type (must be 'bonus' or 'discount')"},
+                    status=400,
+                )
+
+            partner = env["res.partner"].sudo().browse(odoo_partner_id)
+            if not partner.exists():
+                return request.make_json_response(
+                    {"status": 404, "message": "Partner not found or does not belong to this company"},
+                    status=404,
+                )
+
+            # Wallet
+            card = (
+                env["loyalty.card"]
+                .sudo()
+                .search(
+                    [("partner_id", "=", partner.id), ("company_id", "=", company_id)],
+                    limit=1,
+                )
+            )
+            if not card:
+                return request.make_json_response(
+                    {"status": 404, "message": "Wallet not found for this partner"}, status=404
+                )
+
+            # Compensation product
+            product = company.caram_compensation_product_id
+            if not product:
+                return request.make_json_response(
+                    {"status": 500, "message": "Compensation product not configured in company settings"},
+                    status=500,
+                )
+
+            expense_account = (
+                product.property_account_expense_id
+                or product.categ_id.property_account_expense_id
+            )
+            if not expense_account:
+                return request.make_json_response(
+                    {"status": 500, "message": "No expense account configured for compensation product"},
+                    status=500,
+                )
+
+            description = f"Wallet compensation ({comp_type})"
+
+            # -------------------- Accounting entry --------------------
+            if comp_type == "bonus":
+                # Bonus -> credit note using existing helper and compensation product expense account
+                move = self.create_driver_coupon_credit_note(
+                    env, company_id, partner, amount, product=product
+                )
+                if not move:
+                    return request.make_json_response(
+                        {"status": 500, "message": "Failed to create compensation credit note"},
+                        status=500,
+                    )
+            else:
+                # Discount -> invoice entry using _create_invoice_from_lines and expense account
+                invoice_line_vals = {
+                    "product_id": product.id,
+                    "account_id": expense_account.id,
+                    "name": description,
+                    "quantity": 1,
+                    "price_unit": amount,
+                }
+                move = card._create_invoice_from_lines(partner, [invoice_line_vals])
+
+            # -------------------- Wallet & loyalty history --------------------
+            balance_before = card.caram_get_posted_balance()
+            delta = amount if comp_type == "bonus" else -amount
+
+            tx_vals = {
+                "card_id": card.id,
+                "description": description,
+                "issued": delta,
+                "used": 0.0,
+                "status": "posted",
+                "order_model": "account.move",
+                "order_id": move.id,
+            }
+            tx = env["loyalty.history"].sudo().create(tx_vals)
+
+            balance_after = card.caram_get_posted_balance()
+            card.sudo().write({"points": balance_after})
+
+            response = {
+                "status": 200,
+                "journal_entry_id": move.id,
+                "partner_id": partner.id,
+                "wallet_id": card.id,
+                "type": comp_type,
+                "amount": amount,
+                "balance_before": balance_before,
+                "balance_after": balance_after,
+                "loyalty_history_id": tx.id,
+                "message": "Compensation applied successfully",
+            }
+            return request.make_json_response(response, status=200)
+
+        except Exception as e:
+            return request.make_json_response(
+                {"status": 500, "message": f"Internal server error: {str(e)}"},
+                status=500,
+            )
 
     @http.route("/api/wallet_clearing", type="http", auth="none", methods=["POST"], csrf=False)
     def wallet_clearing(self, **kw):
