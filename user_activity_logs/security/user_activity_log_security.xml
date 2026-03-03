@@ -1,8 +1,0 @@
-<odoo>
-    <record id="user_activity_log_rule" model="ir.rule">
-        <field name="name">User Activity Log Rule</field>
-        <field name="model_id" ref="model_user_activity"/>
-        <field name="global" eval="True"/>
-        <field name="domain_force">[]</field>
-    </record>
-</odoo>
