@@ -89,7 +89,8 @@ class ContactRegistrationController(http.Controller):
 
         expense_account = (
             product_coupon.property_account_expense_id
-            or product_coupon.categ_id.property_account_expense_id
+            or product_coupon.categ_id.property_account_expense_categ_id
+            
         )
         if not expense_account:
             expense_account = env['account.account'].sudo().with_company(company_id).search(
