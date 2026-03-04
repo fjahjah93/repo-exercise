@@ -69,7 +69,7 @@ class LoyaltyCard(models.Model):
 
         expense_account = (
             points_product.property_account_expense_id
-            or points_product.categ_id.property_account_expense_id
+            or points_product.categ_id.property_account_expense_categ_id
         )
         if not expense_account:
             expense_account = env['account.account'].sudo().with_company(company_id).search(
