@@ -624,7 +624,7 @@ class ContactRegistrationController(http.Controller):
 
             expense_account = (
                 product.property_account_expense_id
-                or product.categ_id.property_account_expense_id
+                or product.categ_id.property_account_expense_categ_id
             )
             if not expense_account:
                 return request.make_json_response(
