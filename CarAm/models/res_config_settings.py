@@ -52,11 +52,24 @@ class ResCompany(models.Model):
         help='Account for fine revenue'
     )
 
+    caram_compensation_product_id = fields.Many2one(
+        "product.product",
+        string="Compensation Product",
+        help="Product used for wallet compensation (bonus/discount).",
+    )
+
     caram_wallet_journal_id = fields.Many2one(
         "account.journal",
         string="CarAm Wallet Journal",
         domain="[('type', '=', 'sale')]",
         help="General journal used to post wallet transfers / penalties for CarAm rides.",
+    )
+
+    caram_clearing_journal_id = fields.Many2one(
+        "account.journal",
+        string="CarAm Clearing Journal",
+        domain="[('type', '=', 'general')]",
+        help="General journal used to post wallet clearing entries for CarAm rides.",
     )
 
     caram_commission_product_id = fields.Many2one(
@@ -114,6 +127,11 @@ class ResConfigSettings(models.TransientModel):
         related="company_id.caram_wallet_journal_id",
         readonly=False,
     )
+    
+    caram_clearing_journal_id = fields.Many2one(
+        related="company_id.caram_clearing_journal_id",
+        readonly=False,
+    )
 
     caram_commission_product_id = fields.Many2one(
         related="company_id.caram_commission_product_id",
@@ -124,7 +142,12 @@ class ResConfigSettings(models.TransientModel):
         related="company_id.caram_fine_product_id",
         readonly=False,
     )
-    
+
+    caram_compensation_product_id = fields.Many2one(
+        related="company_id.caram_compensation_product_id",
+        readonly=False,
+    )
+
     caram_api_base_url = fields.Char(
         config_parameter='caram.api.base.url',
         default='https://staging.caram.app',

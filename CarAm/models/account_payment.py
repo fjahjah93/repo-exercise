@@ -27,7 +27,6 @@ class AccountPayment(models.Model):
     caram_attachment_name = fields.Char(
         string="File Name"
     )
-
     is_from_api = fields.Boolean(
         string="Created from API",
         default=False,
@@ -35,7 +34,6 @@ class AccountPayment(models.Model):
         readonly=True,
         copy=False,
     )
-
 
     def _get_caram_api_url(self):
         """Get CarAm API base URL from settings"""
@@ -189,17 +187,25 @@ class AccountPayment(models.Model):
                     if not transaction:
                         continue
 
-                    transaction.write({'status': 'posted'})
+                    transaction.write({'status': 'posted','issued':move.amount_company_currency_signed})
 
+                    # -------------------- Update Card Points --------------------
                     # -------------------- Update Card Points --------------------
                     card = transaction.card_id
                     if card:
-                        new_balance = card.points + transaction.issued
+
+                        histories = self.env['loyalty.history'].sudo().search([
+                                        ('card_id', '=', card.id),
+                                        ('status', '=', 'posted')
+                                    ])
+
+                        total_issued = sum(histories.mapped('issued'))
+                        total_used = sum(histories.mapped('used'))
+
+                        new_balance = total_issued - total_used
+
                         card.write({'points': new_balance})
-                        _logger.info(
-                    "NOT FOUND | No loyalty.history for move %s",
-                    new_balance
-                )
+                    
                 except Exception as e:
                     _logger.warning(f"Failed to sync CarAm status on post: {str(e)}")
         return result
