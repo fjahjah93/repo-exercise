@@ -578,6 +578,7 @@ class ContactRegistrationController(http.Controller):
             odoo_partner_id = payload.get("odoo_partner_id")
             comp_type = (payload.get("type") or "").strip().lower()
             amount = payload.get("amount")
+            note = payload.get("note") or ""
 
             # -------------------- Validate input --------------------
             if not amount:
@@ -633,7 +634,7 @@ class ContactRegistrationController(http.Controller):
                     status=500,
                 )
 
-            description = f"Wallet compensation ({comp_type})"
+            description = f"Wallet compensation ({comp_type}) {note}"
 
             # -------------------- Accounting entry --------------------
             if comp_type == "bonus":
