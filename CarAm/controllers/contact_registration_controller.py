@@ -72,7 +72,7 @@ class ContactRegistrationController(http.Controller):
         return bank_account, liability_account, None
 
 
-    def create_driver_coupon_credit_note(self, env, company_id, partner, amount, product=None, description):
+    def create_driver_coupon_credit_note(self, env, company_id, partner, amount, description, product=None):
         """Create & post a customer credit note.
 
         If a product is provided, it will be used directly (e.g. compensation product);
@@ -641,7 +641,7 @@ class ContactRegistrationController(http.Controller):
             if comp_type == "bonus":
                 # Bonus -> credit note using existing helper and compensation product expense account
                 move = self.create_driver_coupon_credit_note(
-                    env, company_id, partner, amount, product=product, description
+                    env, company_id, partner, amount, description, product=product
                 )
                 if not move:
                     return request.make_json_response(
