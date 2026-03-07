@@ -72,7 +72,7 @@ class ContactRegistrationController(http.Controller):
         return bank_account, liability_account, None
 
 
-    def create_driver_coupon_credit_note(self, env, company_id, partner, amount, product=None):
+    def create_driver_coupon_credit_note(self, env, company_id, partner, amount, product=None, description):
         """Create & post a customer credit note.
 
         If a product is provided, it will be used directly (e.g. compensation product);
@@ -107,7 +107,7 @@ class ContactRegistrationController(http.Controller):
             'invoice_line_ids': [(0, 0, {
                 'product_id': product_coupon.id,
                 'account_id': expense_account.id,
-                'name': 'Welcome Coupon - Service Credit',
+                'name': description,
                 'quantity': 1,
                 'price_unit': amount,
             })],
@@ -192,9 +192,10 @@ class ContactRegistrationController(http.Controller):
 
             card = env["loyalty.card"].sudo().create({"program_id": program.id, "partner_id": partner.id})
             wallet_balance = 0.0
+            description = "Welcome Coupon - Service Credit"
 
             if coupon_value > 0:
-                credit_note = self.create_driver_coupon_credit_note(env, company_id, partner, coupon_value)
+                credit_note = self.create_driver_coupon_credit_note(env, company_id, partner, coupon_value, description)
                 if credit_note:
                     # -------------------- Create Loyalty History --------------------
                     env["loyalty.history"].sudo().create({
@@ -640,7 +641,7 @@ class ContactRegistrationController(http.Controller):
             if comp_type == "bonus":
                 # Bonus -> credit note using existing helper and compensation product expense account
                 move = self.create_driver_coupon_credit_note(
-                    env, company_id, partner, amount, product=product
+                    env, company_id, partner, amount, product=product, description
                 )
                 if not move:
                     return request.make_json_response(
