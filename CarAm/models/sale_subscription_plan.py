@@ -13,7 +13,6 @@ class SaleSubscriptionPlan(models.Model):
             ('vip', 'VIP'),
             ('van', 'Van'),
             ('taxi', 'Taxi'),
-            ('laxuary', 'Laxuary'),
             ('other', 'Other'),
         ],
         string='Subscription Type',
