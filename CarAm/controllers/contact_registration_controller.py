@@ -268,16 +268,11 @@ class ContactRegistrationController(http.Controller):
             # -------------------- Delete --------------------
             partner.unlink()
 
-            return json.dumps({
-                "status": "success",
-                "message": "Contact deleted successfully"
-            })
+            return request.make_json_response({"status": "success", "message": "Contact deleted successfully"}, status=200)
 
         except Exception as e:
-            return json.dumps({
-                "status": "error",
-                "message": str(e)
-            })
+            return request.make_json_response({"error": f"Failed to update contact: {str(e)}"}, status=500)
+        
         
     @http.route("/api/update_contact", type="http", auth="none", methods=["PUT"], csrf=False)
     def update_contact(self, **kw):
