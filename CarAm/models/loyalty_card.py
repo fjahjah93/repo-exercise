@@ -124,7 +124,7 @@ class LoyaltyCard(models.Model):
 
         journal = self.env["account.journal"].sudo().search(
             [
-                ("journal_sub_type", "=", payment_method_type),
+                ("wallet_type_id", "=", payment_method_type),
                 ("company_id", "=", self.company_id.id),
             ],
             limit=1,

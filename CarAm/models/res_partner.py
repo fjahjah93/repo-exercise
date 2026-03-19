@@ -24,7 +24,12 @@ class ResPartner(models.Model):
         ('driver', 'Driver'),
         ('rider', 'Rider'),
     ], string='Contact Type')
-    
+     
+
+    billing_type = fields.Selection([
+        ('commission', 'Commission'),
+        ('subscription', 'Subscription'),
+    ], string='Billing Type')
  
     
     @api.constrains('sub_id', 'company_id')

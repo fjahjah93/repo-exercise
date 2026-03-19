@@ -135,6 +135,7 @@ class ContactRegistrationController(http.Controller):
             gender = payload.get("gender")
             contact_type = payload.get("contact_type")
             coupon_value = float(payload.get("coupon_value", 0.0))
+            billing_type = payload.get("billing_type") # subscription,commission
 
             # -------------------- Required Fields --------------------
             if not sub_id:
@@ -149,6 +150,9 @@ class ContactRegistrationController(http.Controller):
 
             if contact_type and contact_type not in ["driver", "rider"]:
                 return request.make_json_response({"error": "Invalid contact_type"}, status=400)
+            
+            if billing_type and billing_type not in ["commission", "subscription"]:
+                return request.make_json_response({"error": "Invalid Billing_type"}, status=400)
 
             # -------------------- Check Existing Contact --------------------
             domain = []
@@ -173,6 +177,7 @@ class ContactRegistrationController(http.Controller):
                     "city": city,
                     "gender": gender,
                     "contact_type": contact_type,
+                    "billing_type": billing_type,
                     "company_id": company_id,
                     "customer_rank": 1,
                     "type": "contact",
@@ -226,6 +231,54 @@ class ContactRegistrationController(http.Controller):
         except Exception as e:
             return request.make_json_response({"error": str(e)}, status=500)
 
+
+    @http.route('/api/delete_contact', type='http', auth='none', methods=['POST'], csrf=False)
+    def delete_contact(self, **kw):
+        try:
+            payload = json.loads(request.httprequest.data.decode('utf-8'))
+
+            # -------------------- Auth --------------------
+            user = self._authenticate()
+            env = request.env(user=user)
+
+            # -------------------- Input --------------------
+            partner_id = payload.get('odoo_partner_id')
+            if not partner_id:
+                return json.dumps({
+                    "status": "error",
+                    "message": "odoo_partner_id is required"
+                })
+
+            partner = env['res.partner'].browse(int(partner_id))
+
+            # -------------------- Validation --------------------
+            if not partner.exists():
+                return json.dumps({
+                    "status": "error",
+                    "message": "Contact not found"
+                })
+
+            # Optional: prevent deleting companies or important contacts
+            if partner.is_company:
+                return json.dumps({
+                     "status": "error",
+                     "message": "Cannot delete company contacts"
+                 })
+
+            # -------------------- Delete --------------------
+            partner.unlink()
+
+            return json.dumps({
+                "status": "success",
+                "message": "Contact deleted successfully"
+            })
+
+        except Exception as e:
+            return json.dumps({
+                "status": "error",
+                "message": str(e)
+            })
+        
     @http.route("/api/update_contact", type="http", auth="none", methods=["PUT"], csrf=False)
     def update_contact(self, **kw):
         try:
@@ -246,6 +299,7 @@ class ContactRegistrationController(http.Controller):
             city = payload.get("city")
             gender = payload.get("gender")
             contact_type = payload.get("contact_type")
+            billing_type = payload.get("billing_type") # subscription,commission
 
             # ------------------------------------------------------------------
             # Validate required identifier
@@ -290,6 +344,11 @@ class ContactRegistrationController(http.Controller):
                 if contact_type not in ['driver', 'rider']:
                     return request.make_json_response({"error": "Invalid contact_type"}, status=400)
                 update_vals['contact_type'] = contact_type
+            
+            if billing_type:
+                if billing_type not in ['commission', 'subscription']:
+                    return request.make_json_response({"error": "Invalid billing_type"}, status=400)
+                update_vals['billing_type'] = billing_type
 
             if update_vals:
                 partner.sudo().write(update_vals)
@@ -304,7 +363,8 @@ class ContactRegistrationController(http.Controller):
                 "mobile": partner.mobile or "",
                 "city": partner.city or "",
                 "gender": partner.gender or "",
-                "contact_type": partner.contact_type or ""
+                "contact_type": partner.contact_type or "",
+                "billing_type": partner.billing_type or ""
             }
 
             return request.make_json_response({"status": "success", "message": "Contact updated successfully", "data": data}, status=200)

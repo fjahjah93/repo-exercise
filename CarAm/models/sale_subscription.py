@@ -14,7 +14,7 @@ class SaleOrder(models.Model):
 
     @api.model
     def create_subscription_with_invoice(self, partner_id, caram_subscription_id, 
-                                         subscription_type, price, start_date, 
+                                         subscription_type, price, disc, start_date, 
                                          end_date, company_id):
         """Create subscription, invoice, and pay from wallet balance"""
         
@@ -60,6 +60,7 @@ class SaleOrder(models.Model):
                 'qty_delivered': 1,
                 'product_uom_qty': 1,
                 'price_unit': price,
+                'discount': disc,
             })],
         })
         
