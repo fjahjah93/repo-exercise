@@ -660,11 +660,16 @@ class ContactRegistrationController(http.Controller):
             partner_id = payload.get("odoo_partner_id")
             amount = float(payload.get("amount", 0))
             transaction_id = payload.get("transaction_id")
+            transaction_type = payload.get("transaction_type")
             bank = payload.get("bank")
             account_number = payload.get("account_number")
             note = payload.get("note") or ""
             
             # -------------------- Validate required fields --------------------
+            if not transaction_type:
+                return request.make_json_response({"error": "transaction_type is required"}, status=400)
+            if transaction_type not in ["direct", "bank_transfer"]:
+                return request.make_json_response({"error": "Invalid transaction_type"}, status=400)
             if not partner_id:
                 return request.make_json_response({"error": "odoo_partner_id is required"}, status=400)
             if not amount or amount <= 0:
@@ -703,8 +708,8 @@ class ContactRegistrationController(http.Controller):
             move = None
             if bank_account and liability_account:
                 ref = note
-                should_post = False
-                state = 'draft'
+                should_post = (transaction_type == "direct")
+                state = 'posted' if should_post else 'draft'
                 payment_method_type = 'bank'
                 image_url = ''
               

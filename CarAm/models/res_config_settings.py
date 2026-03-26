@@ -58,17 +58,6 @@ class ResCompany(models.Model):
         help='Default payable for Drivers',
     )
 
-    caram_salesperson_account_prefix = fields.Char(
-        string="Salesperson Account Prefix",
-        help="Prefix used to auto-create salesperson receivable accounts (e.g. 411).",
-    )
-
-    caram_salesperson_allow_auto_create = fields.Boolean(
-        string="Allow Auto Create Salesperson Receivable Account",
-        default=False,
-        help="If enabled, create a missing salesperson receivable account using the prefix.",
-    )
-    
     caram_mobile_payment_services_account_id = fields.Many2one(
         'account.account',
         string='mobile payment services Account',
@@ -161,15 +150,6 @@ class ResConfigSettings(models.TransientModel):
         readonly=False,
     )
 
-    caram_salesperson_account_prefix = fields.Char(
-        related='company_id.caram_salesperson_account_prefix',
-        readonly=False,
-    )
-
-    caram_salesperson_allow_auto_create = fields.Boolean(
-        related='company_id.caram_salesperson_allow_auto_create',
-        readonly=False,
-    )
     
     caram_mobile_payment_services_account_id = fields.Many2one(
         related='company_id.caram_mobile_payment_services_account_id',

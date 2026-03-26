@@ -77,23 +77,7 @@
                                            options="{'no_create': True, 'no_create_edit': True}"/>
                                 </div>
                             </div>
-
-                            <div class="row mt16">
-                                <label string="Salesperson Account Prefix" for="caram_salesperson_account_prefix"
-                                       class="col-lg-3 o_light_label"/>
-                                <div class="col-lg-12">
-                                    <field name="caram_salesperson_account_prefix" class="o_light_label"
-                                           placeholder="411"/>
-                                </div>
-                            </div>
-
-                            <div class="row mt16">
-                                <label string="Allow Auto Create Salesperson Receivable" for="caram_salesperson_allow_auto_create"
-                                       class="col-lg-3 o_light_label"/>
-                                <div class="col-lg-12">
-                                    <field name="caram_salesperson_allow_auto_create" class="o_light_label"/>
-                                </div>
-                            </div>
+                
                             
                             <div class="row mt16">
                                 <label string="Mobile Payment Services Account" for="caram_mobile_payment_services_account_id"
