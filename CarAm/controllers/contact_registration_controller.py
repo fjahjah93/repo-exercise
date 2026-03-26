@@ -367,6 +367,83 @@ class ContactRegistrationController(http.Controller):
         except Exception as e:
             return request.make_json_response({"error": f"Failed to update contact: {str(e)}"}, status=500)
 
+
+    @http.route("/api/get_balance", type="http", auth="none", methods=["POST"], csrf=False)
+    def get_balance(self, **kw):
+        """Return wallet balances from Loyality Card."""
+        try:
+            payload = json.loads(request.httprequest.data.decode("utf-8"))
+            user = self._authenticate()
+            env = self._get_env(user)
+            company_id = user.company_id.id
+
+            raw_partner_id = payload.get("odoo_partner_id")
+            type_raw = payload.get("type") or payload.get("Type")
+            contact_kind = str(type_raw).strip().lower() if type_raw is not None and type_raw != "" else None
+
+            if raw_partner_id is not None:
+                try:
+                    partner_pk = int(raw_partner_id)
+                except (TypeError, ValueError):
+                    return request.make_json_response({"error": "Invalid odoo_partner_id"}, status=400)
+
+                partner = env["res.partner"].sudo().browse(partner_pk)
+                if not partner.exists() or partner.company_id.id != company_id:
+                    return request.make_json_response(
+                        {"error": "Partner not found or does not belong to this company"},
+                        status=404,
+                    )
+
+                card = env["loyalty.card"].sudo().search(
+                    [("partner_id", "=", partner.id), ("company_id", "=", company_id)],
+                    limit=1,
+                )
+                if not card:
+                    return request.make_json_response({"error": "Wallet not found for this partner"}, status=404)
+
+                body = {
+                    "status": 200,
+                    "type": "single_user",
+                    "data": {
+                        "user_id": partner.id,
+                        "name": partner.name,
+                        "balance": float(card.points or 0.0),
+                    },
+                }
+                return request.make_json_response(body, status=200)
+
+            if contact_kind:
+                if contact_kind not in ("rider", "driver"):
+                    return request.make_json_response(
+                        {"error": 'Invalid type; expected "rider" or "driver"'},
+                        status=400,
+                    )
+                domain = [
+                    ("company_id", "=", company_id),
+                    ("partner_id.contact_type", "=", contact_kind),
+                ]
+            else:
+                domain = [("company_id", "=", company_id)]
+
+            cards = env["loyalty.card"].sudo().search(domain, order="partner_id")
+            rows = []
+            for card in cards:
+                partner = card.partner_id
+                rows.append({
+                    "user_id": partner.id,
+                    "name": partner.name,
+                    "type": partner.contact_type or "",
+                    "balance": float(card.points or 0.0),
+                })
+
+            return request.make_json_response(
+                {"status": 200, "count": len(rows), "data": rows},
+                status=200,
+            )
+
+        except Exception as e:
+            return request.make_json_response({"error": str(e)}, status=500)
+
     @http.route("/api/add_wallet_transaction", type="http", auth="none", methods=["POST"], csrf=False)
     def add_wallet_transaction(self, **kw):
         try:
@@ -379,6 +456,7 @@ class ContactRegistrationController(http.Controller):
             odoo_partner_id = payload.get("odoo_partner_id")
             transaction_id = payload.get("transaction_id")
             payment_method_type = payload.get("payment_method_type")
+            salesperson_id = payload.get("salesperson_id")
             transaction_type = payload.get("transaction_type")
             amount = payload.get("amount") 
             reference = payload.get("reference")
@@ -398,6 +476,11 @@ class ContactRegistrationController(http.Controller):
                 return request.make_json_response({"error": "Invalid transaction_type"}, status=400)
             if not amount or amount <= 0:
                 return request.make_json_response({"error": "amount is required and must be greater than 0"}, status=400)
+            if payment_method_type == "salesperson" and not salesperson_id:
+                return request.make_json_response(
+                    {"error": "salesperson_id is required for payment_method_type = 'salesperson'"},
+                    status=400,
+                )
 
             # -------------------- Find Partner --------------------
             partner = env['res.partner'].sudo().browse(odoo_partner_id)
@@ -426,18 +509,73 @@ class ContactRegistrationController(http.Controller):
               
                 if payment_method_type == 'points':
                     move_credit = wallet.create_points_credit_note(env, company_id, partner, amount)
+                    
+                elif payment_method_type == 'salesperson':
+                    salesperson = env['res.partner'].sudo().browse(salesperson_id)
+                    if not salesperson.exists() or salesperson.company_id.id != company_id:
+                        return request.make_json_response(
+                            {"error": "Salesperson not found or does not belong to this company"},
+                            status=404,
+                        )
+
+                    wallet_receivable = partner.with_company(company_id).property_account_receivable_id
+                    if not wallet_receivable:
+                        return request.make_json_response(
+                            {"error": "Wallet partner has no receivable account configured"},
+                            status=500,
+                        )
+
+                    journal = env['account.journal'].sudo().with_company(company_id).search(
+                        [('company_id', '=', company_id), ("wallet_type_id", "=", payment_method_type)],
+                        limit=1,
+                    )
+
+                    if not journal:
+                        return request.make_json_response(
+                            {"error": "No general journal found to post wallet salesperson entries"},
+                            status=500,
+                        )
+
+                    move_vals = {
+                        'move_type': 'entry',
+                        'journal_id': journal.id,
+                        'date': fields.Date.today(),
+                        'ref': f'Wallet top-up via Salesperson {salesperson.display_name}',
+                        'is_from_api': True,
+                        'line_ids': [
+                            (0, 0, {
+                                'name': ref or 'Wallet top-up via Salesperson',
+                                'partner_id': salesperson.id,
+                                'account_id': salesperson.property_account_receivable_id.id,
+                                'debit': amount,
+                                'credit': 0.0,
+                            }),
+                            (0, 0, {
+                                'name': ref or 'Wallet top-up via Salesperson',
+                                'partner_id': partner.id,
+                                'account_id': wallet_receivable.id,
+                                'debit': 0.0,
+                                'credit': amount,
+                            }),
+                        ],
+                    }
+
+                    move = env['account.move'].sudo().with_company(company_id).create(move_vals)
+                    if should_post:
+                        move.action_post()
+                    journal_transaction_id = transaction_id
                 else:
                     move, error = wallet._create_payment(
-                    partner,
-                    amount,
-                    payment_method_type,
-                    ref,
-                    should_post=should_post,
-                    transaction_id=transaction_id,
-                    image_url=image_url,
-                    bank=bank,
-                    account_number=account_number,
-                )
+                        partner,
+                        amount,
+                        payment_method_type,
+                        ref,
+                        should_post=should_post,
+                        transaction_id=transaction_id,
+                        image_url=image_url,
+                        bank=bank,
+                        account_number=account_number,
+                    )
                     if move:
                         journal_transaction_id = move.caram_transaction_id
                     if error:
@@ -460,7 +598,7 @@ class ContactRegistrationController(http.Controller):
             
                 if move:
                     transaction_vals.update({
-                    "order_model": "account.payment",
+                    "order_model": move._name,
                     "order_id": move.id,
                 })
                 elif move_credit:
@@ -524,7 +662,7 @@ class ContactRegistrationController(http.Controller):
             transaction_id = payload.get("transaction_id")
             bank = payload.get("bank")
             account_number = payload.get("account_number")
-            note = payload.get("note", "")
+            note = payload.get("note") or ""
             
             # -------------------- Validate required fields --------------------
             if not partner_id:

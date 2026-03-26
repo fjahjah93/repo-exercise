@@ -10,6 +10,7 @@ class WalletType(models.Model):
     code = fields.Char()
     journal_ids = fields.One2many('account.journal', 'wallet_type_id')
     company_id = fields.Many2one('res.company')
+    
 class AccountJournal(models.Model):
     _inherit = 'account.journal'
 
