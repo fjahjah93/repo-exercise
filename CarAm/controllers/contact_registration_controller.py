@@ -368,8 +368,115 @@ class ContactRegistrationController(http.Controller):
             return request.make_json_response({"error": f"Failed to update contact: {str(e)}"}, status=500)
 
 
+    
     @http.route("/api/get_balance", type="http", auth="none", methods=["POST"], csrf=False)
-    def get_balance(self, **kw):
+    def get_wallet_balance(self):
+        """Return wallet balances from Loyalty Card."""
+        try:
+            payload = json.loads(request.httprequest.data.decode("utf-8"))
+
+            user = self._authenticate()
+            env = self._get_env(user)
+            company_id = user.company_id.id
+
+        # -------------------------
+        # Input Handling
+        # -------------------------
+            raw_partner_id = payload.get("odoo_partner_id")
+            type_raw = payload.get("type") or payload.get("Type")
+
+            partner_pk = None
+            if raw_partner_id not in (None, "", False):
+                try:
+                    partner_pk = int(raw_partner_id)
+                except (TypeError, ValueError):
+                    return request.make_json_response(
+                    {"error": "Invalid odoo_partner_id"}, status=400
+                )
+
+            contact_kind = None
+            if type_raw not in (None, "", False):
+                contact_kind = str(type_raw).strip().lower()
+                if contact_kind not in ("rider", "driver"):
+                    return request.make_json_response(
+                    {"error": 'Invalid type; expected "rider" or "driver"'},
+                    status=400,
+                )
+
+        # -------------------------
+        # Case 1: Specific Partner
+        # -------------------------
+            if partner_pk:
+                partner = env["res.partner"].sudo().browse(partner_pk)
+
+                if not partner.exists() or partner.company_id.id != company_id:
+                    return request.make_json_response(
+                    {"error": "Partner not found or does not belong to this company"},
+                    status=404,
+                )
+
+                card = env["loyalty.card"].sudo().search(
+                [
+                    ("partner_id", "=", partner.id),
+                    ("company_id", "=", company_id),
+                ],
+                limit=1,
+            )
+
+                if not card:
+                    return request.make_json_response(
+                    {"error": "Wallet not found for this partner"}, status=404
+                )
+
+                return request.make_json_response(
+                {
+                    "status": 200,
+                    "type": "single_user",
+                    "data": {
+                        "user_id": partner.id,
+                        "name": partner.name,
+                        "balance": float(card.points or 0.0),
+                    },
+                },
+                status=200,
+            )
+
+        # -------------------------
+        # Case 2: List (filtered or all)
+        # -------------------------
+            domain = [("company_id", "=", company_id)]
+
+            if contact_kind:
+                domain.append(("partner_id.contact_type", "=", contact_kind))
+
+            cards = env["loyalty.card"].sudo().search(domain, order="partner_id")
+
+            data = []
+            for card in cards:
+                partner = card.partner_id
+                data.append({
+                "user_id": partner.id,
+                "name": partner.name,
+                "type": partner.contact_type or "",
+                "balance": float(card.points or 0.0),
+            })
+
+            return request.make_json_response(
+            {
+                "status": 200,
+                "count": len(data),
+                "data": data,
+            },
+            status=200,
+        )
+
+        except Exception as e:
+            return request.make_json_response(
+            {"error": str(e)},
+            status=500,
+        )    
+    
+    def old_get_balance(self, **kw):
         """Return wallet balances from Loyality Card."""
         try:
             payload = json.loads(request.httprequest.data.decode("utf-8"))
