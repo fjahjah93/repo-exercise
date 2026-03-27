@@ -895,7 +895,7 @@ class ContactRegistrationController(http.Controller):
                     {"status": 400, "message": "odoo_partner_id is required"}, status=400
                 )
 
-            if comp_type not in ["bonus", "discount"]:
+            if comp_type not in ["bonus", "discount", "return_bonus"]:
                 return request.make_json_response(
                     {"status": 400, "message": "Invalid type (must be 'bonus' or 'discount')"},
                     status=400,
@@ -923,9 +923,15 @@ class ContactRegistrationController(http.Controller):
                 )
 
             # Compensation product
-            product = company.caram_compensation_product_id
-            if not product:
-                return request.make_json_response(
+            if comp_type == "return_bonus":
+                product = env['product.product'].sudo().with_company(company_id).search(
+                [('is_coupon', '=', True)],
+                limit=1,
+                )
+            else:
+                product = company.caram_compensation_product_id
+                if not product:
+                    return request.make_json_response(
                     {"status": 500, "message": "Compensation product not configured in company settings"},
                     status=500,
                 )
@@ -943,7 +949,51 @@ class ContactRegistrationController(http.Controller):
             description = f"Wallet compensation ({comp_type}) {note}"
 
             # -------------------- Accounting entry --------------------
-            if comp_type == "bonus":
+            if comp_type == "return_bonus":
+                # Bonus -> credit note using existing helper and compensation product expense account
+                journal = self.env["account.journal"].sudo().with_company(self.company_id.id).search(
+                    [("company_id", "=", self.company_id.id), ("type", "=", "general")],
+                    limit=1,
+                    )
+                if not journal:
+                    raise UserError(_("No journal found to post CarAm wallet transfer entries."))
+
+                wallet_receivable = partner.with_company(company_id).property_account_receivable_id
+                if not wallet_receivable:
+                    return request.make_json_response(
+                            {"error": "Wallet partner has no receivable account configured"},
+                            status=500,
+                        )
+                ref = f"Return Bonus {self.partner} wallet transfer"
+                move_vals = {
+                    "move_type": "entry",
+                    "journal_id": journal.id,   
+                    "date": fields.Date.context_today(self),
+                    "ref": ref,
+                    "is_from_api": True,
+                    "line_ids": [
+                        (0, 0, {
+                    "name": ref,
+                    "partner_id": partner.id,
+                    'account_id': wallet_receivable.id,
+                    "debit": amount,
+                    "credit": 0.0,
+                        }),
+                        (0, 0, {
+                    "name": ref,
+                    "partner_id": partner.id,
+                    'product_id': product.id,
+                    'account_id': expense_account.id,
+                    "debit": 0.0,
+                    "credit": amount,
+                        }),
+                        ],
+                     }
+
+                journal_entry = self.env["account.move"].sudo().with_company(self.company_id.id).create(move_vals)
+                journal_entry.action_post()
+
+            elif comp_type == "bonus":
                 # Bonus -> credit note using existing helper and compensation product expense account
                 move = self.create_driver_coupon_credit_note(
                     env, company_id, partner, amount, description, product=product
