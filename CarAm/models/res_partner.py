@@ -33,7 +33,7 @@ class ResPartner(models.Model):
     def _caram_apply_accounting_partner_accounts(self):
         """Set company-dependent AR/AP from CarAm settings when role is rider or driver."""
         for partner in self:
-            company = partner.env.company
+            company = partner.company_id or self.env.company
             if not company:
                 continue
         
@@ -50,7 +50,7 @@ class ResPartner(models.Model):
             if not receivable or not payable:
                 continue
 
-            partner.with_company(company).write({
+            partner.with_context(force_company=company.id).write({
                 'property_account_receivable_id': receivable.id,
                 'property_account_payable_id': payable.id,
             })
