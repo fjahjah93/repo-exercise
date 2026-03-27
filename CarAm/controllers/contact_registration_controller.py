@@ -964,7 +964,7 @@ class ContactRegistrationController(http.Controller):
                             {"error": "Wallet partner has no receivable account configured"},
                             status=500,
                         )
-                ref = f"Return Bonus {partner} wallet transfer"
+                ref = f"Return Bonus {partner.name} wallet transfer"
                 move_vals = {
                     "move_type": "entry",
                     "journal_id": journal.id,   
