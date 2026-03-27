@@ -968,7 +968,7 @@ class ContactRegistrationController(http.Controller):
                 move_vals = {
                     "move_type": "entry",
                     "journal_id": journal.id,   
-                    "date": fields.Date.context_today(self),
+                    "date": fields.Date.today(),
                     "ref": ref,
                     "is_from_api": True,
                     "line_ids": [
