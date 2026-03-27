@@ -951,8 +951,8 @@ class ContactRegistrationController(http.Controller):
             # -------------------- Accounting entry --------------------
             if comp_type == "return_bonus":
                 # Bonus -> credit note using existing helper and compensation product expense account
-                journal = env["account.journal"].sudo().with_company(self.company_id.id).search(
-                    [("company_id", "=", self.company_id.id), ("type", "=", "general")],
+                journal = env["account.journal"].sudo().with_company(company_id.id).search(
+                    [("company_id", "=", company_id.id), ("type", "=", "general")],
                     limit=1,
                     )
                 if not journal:
@@ -964,7 +964,7 @@ class ContactRegistrationController(http.Controller):
                             {"error": "Wallet partner has no receivable account configured"},
                             status=500,
                         )
-                ref = f"Return Bonus {self.partner} wallet transfer"
+                ref = f"Return Bonus {partner} wallet transfer"
                 move_vals = {
                     "move_type": "entry",
                     "journal_id": journal.id,   
@@ -990,7 +990,7 @@ class ContactRegistrationController(http.Controller):
                         ],
                      }
 
-                journal_entry = env["account.move"].sudo().with_company(self.company_id.id).create(move_vals)
+                journal_entry = env["account.move"].sudo().with_company(company_id.id).create(move_vals)
                 journal_entry.action_post()
 
             elif comp_type == "bonus":
