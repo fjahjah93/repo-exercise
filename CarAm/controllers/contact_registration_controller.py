@@ -897,7 +897,7 @@ class ContactRegistrationController(http.Controller):
 
             if comp_type not in ["bonus", "discount", "return_bonus"]:
                 return request.make_json_response(
-                    {"status": 400, "message": "Invalid type (must be 'bonus' or 'discount')"},
+                    {"status": 400, "message": "Invalid type (must be 'bonus' or 'return_bonus' or 'discount')"},
                     status=400,
                 )
 
@@ -992,6 +992,7 @@ class ContactRegistrationController(http.Controller):
 
                 journal_entry = env["account.move"].sudo().with_company(company_id).create(move_vals)
                 journal_entry.action_post()
+                move = journal_entry
 
             elif comp_type == "bonus":
                 # Bonus -> credit note using existing helper and compensation product expense account
