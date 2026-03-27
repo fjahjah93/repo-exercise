@@ -512,7 +512,7 @@ class ContactRegistrationController(http.Controller):
                     
                 elif payment_method_type == 'salesperson':
                     salesperson = env['res.partner'].sudo().browse(salesperson_id)
-                    if not salesperson.exists() or salesperson.company_id.id != company_id:
+                    if not salesperson.exists():
                         return request.make_json_response(
                             {"error": "Salesperson not found or does not belong to this company"},
                             status=404,

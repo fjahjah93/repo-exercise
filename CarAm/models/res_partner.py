@@ -33,7 +33,7 @@ class ResPartner(models.Model):
     def _caram_apply_accounting_partner_accounts(self):
         """Set company-dependent AR/AP from CarAm settings when role is rider or driver."""
         for partner in self:
-            company = partner.company_id or partner.env.company
+            company = partner.env.company
             if not company:
                 continue
         
