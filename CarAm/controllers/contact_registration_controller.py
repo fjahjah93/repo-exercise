@@ -664,6 +664,10 @@ class ContactRegistrationController(http.Controller):
             bank = payload.get("bank")
             account_number = payload.get("account_number")
             note = payload.get("note") or ""
+<<<<<<< HEAD
+=======
+
+>>>>>>> 58f4150 (m)
             
             # -------------------- Validate required fields --------------------
             if not transaction_type:
