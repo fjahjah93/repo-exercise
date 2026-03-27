@@ -951,8 +951,8 @@ class ContactRegistrationController(http.Controller):
             # -------------------- Accounting entry --------------------
             if comp_type == "return_bonus":
                 # Bonus -> credit note using existing helper and compensation product expense account
-                journal = env["account.journal"].sudo().with_company(company_id.id).search(
-                    [("company_id", "=", company_id.id), ("type", "=", "general")],
+                journal = env["account.journal"].sudo().with_company(company_id).search(
+                    [("company_id", "=", company_id), ("type", "=", "general")],
                     limit=1,
                     )
                 if not journal:
@@ -990,7 +990,7 @@ class ContactRegistrationController(http.Controller):
                         ],
                      }
 
-                journal_entry = env["account.move"].sudo().with_company(company_id.id).create(move_vals)
+                journal_entry = env["account.move"].sudo().with_company(company_id).create(move_vals)
                 journal_entry.action_post()
 
             elif comp_type == "bonus":
