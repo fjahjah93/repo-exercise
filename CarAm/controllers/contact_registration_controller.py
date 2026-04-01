@@ -895,9 +895,9 @@ class ContactRegistrationController(http.Controller):
                     {"status": 400, "message": "odoo_partner_id is required"}, status=400
                 )
 
-            if comp_type not in ["bonus", "discount", "return_bonus"]:
+            if comp_type not in ["bonus", "discount", "return_bonus", "coupon"]:
                 return request.make_json_response(
-                    {"status": 400, "message": "Invalid type (must be 'bonus' or 'return_bonus' or 'discount')"},
+                    {"status": 400, "message": "Invalid type (must be 'bonus', 'coupon', 'return_bonus' or 'discount')"},
                     status=400,
                 )
 
