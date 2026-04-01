@@ -994,6 +994,17 @@ class ContactRegistrationController(http.Controller):
                 journal_entry.action_post()
                 move = journal_entry
 
+            elif comp_type == "coupon":
+                # Bonus -> credit note using existing helper and compensation product expense account
+                move = self.create_driver_coupon_credit_note(
+                    env, company_id, partner, amount, description
+                )
+                if not move:
+                    return request.make_json_response(
+                        {"status": 500, "message": "Failed to create welcome coupon credit note"},
+                        status=500,
+                    )
+                
             elif comp_type == "bonus":
                 # Bonus -> credit note using existing helper and compensation product expense account
                 move = self.create_driver_coupon_credit_note(
