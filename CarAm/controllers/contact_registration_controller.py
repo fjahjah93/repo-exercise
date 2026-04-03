@@ -1345,7 +1345,7 @@ class ContactRegistrationController(http.Controller):
                     penalties=penalties,
                     payment_mode=payment_mode,
                 )
-                if coupon_value:
+                if coupon_value>0:
                     # Wallet
                     card = (env["loyalty.card"].sudo().search( [("partner_id", "=", driver.id), ("company_id", "=", company_id)],
                     limit=1,))
