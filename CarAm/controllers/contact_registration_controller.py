@@ -1278,6 +1278,8 @@ class ContactRegistrationController(http.Controller):
             fare_amount = float(payload.get("fare_amount"))
             ride_id = payload.get("ride_id")
             wallet_paid = payload.get("wallet_paid", 0.0)
+            coupon_value = payload.get("coupon_value", 0.0)
+            coupon_description = payload.get("coupon_description")
             cash_paid = payload.get("cash_paid", 0.0)
             commission_amount = payload.get("commission_amount", 0.0)
             penalties = payload.get("penalties", []) or []
@@ -1343,6 +1345,43 @@ class ContactRegistrationController(http.Controller):
                     penalties=penalties,
                     payment_mode=payment_mode,
                 )
+                if coupon_value:
+                    # Wallet
+                    card = (env["loyalty.card"].sudo().search( [("partner_id", "=", driver.id), ("company_id", "=", company_id)],
+                    limit=1,))
+                    if not card:
+                        return request.make_json_response(
+                            {"status": 404, "message": "Wallet not found for this partner"}, status=404
+                          )
+
+                    # Bonus -> credit note using existing helper and compensation product expense account
+                    move = self.create_driver_coupon_credit_note(
+                    env, company_id, driver, coupon_value, coupon_description
+                )
+                    if not move:
+                        return request.make_json_response(
+                        {"status": 500, "message": "Failed to create welcome coupon credit note"},
+                        status=500,
+                    )
+                     # -------------------- Wallet & loyalty history --------------------
+                    balance_before = card.caram_get_posted_balance()
+                    delta = coupon_value
+
+                    tx_vals = {
+                "card_id": card.id,
+                "description": coupon_description,
+                "issued": delta,
+                "used": 0.0,
+                "status": "posted",
+                "order_model": "account.move",
+                "order_id": move.id,
+            }
+                    tx = env["loyalty.history"].sudo().create(tx_vals)
+
+                    balance_after = card.caram_get_posted_balance()
+                    card.sudo().write({"points": balance_after})
+
+            
             except UserError as e:
                 msg = str(e)
                 if "Insufficient wallet balance" in msg:
