@@ -4,7 +4,6 @@ from odoo import models, fields, api
 from odoo.exceptions import ValidationError
 
 
-
 class ResPartner(models.Model):
     _inherit = 'res.partner'
 
@@ -24,8 +23,44 @@ class ResPartner(models.Model):
         ('driver', 'Driver'),
         ('rider', 'Rider'),
     ], string='Contact Type')
-    
- 
+     
+
+    billing_type = fields.Selection([
+        ('commission', 'Commission'),
+        ('subscription', 'Subscription'),
+    ], string='Billing Type')
+
+    def _caram_apply_accounting_partner_accounts(self):
+        """Set company-dependent AR/AP from CarAm settings when role is rider or driver."""
+        for partner in self:
+            company = partner.company_id or self.env.company
+            if not company:
+                continue
+        
+            role = partner.contact_type
+            if not role:
+                continue
+            if role == 'rider':
+                receivable = company.caram_rider_receivable_account_id
+                payable = company.caram_rider_payable_account_id
+                
+            elif role == 'driver':
+                receivable = company.caram_driver_receivable_account_id
+                payable = company.caram_driver_payable_account_id
+            if not receivable or not payable:
+                continue
+
+            partner.with_context(force_company=company.id).write({
+                'property_account_receivable_id': receivable.id,
+                'property_account_payable_id': payable.id,
+            })
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        partners = super().create(vals_list)
+        partners._caram_apply_accounting_partner_accounts()
+        return partners
+
     
     @api.constrains('sub_id', 'company_id')
     def _check_unique_sub_id(self):

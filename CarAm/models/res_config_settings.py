@@ -32,7 +32,32 @@ class ResCompany(models.Model):
         domain="[('account_type', '=', 'liability_current')]",
         help='Account for driver wallet transactions'
     )
-    
+
+    caram_rider_receivable_account_id = fields.Many2one(
+        'account.account',
+        string='Rider Receivable Account',
+        domain="[('account_type', '=', 'asset_receivable')]",
+        help='Default receivable for Riders',
+    )
+    caram_rider_payable_account_id = fields.Many2one(
+        'account.account',
+        string='Rider Payable Account',
+        domain="[('account_type', '=', 'liability_payable')]",
+        help='Default payable for Riders',
+    )
+    caram_driver_receivable_account_id = fields.Many2one(
+        'account.account',
+        string='Driver Receivable Account',
+        domain="[('account_type', '=', 'asset_receivable')]",
+        help='Default receivable for Drivers',
+    )
+    caram_driver_payable_account_id = fields.Many2one(
+        'account.account',
+        string='Driver Payable Account',
+        domain="[('account_type', '=', 'liability_payable')]",
+        help='Default payable for Drivers',
+    )
+
     caram_mobile_payment_services_account_id = fields.Many2one(
         'account.account',
         string='mobile payment services Account',
@@ -52,11 +77,24 @@ class ResCompany(models.Model):
         help='Account for fine revenue'
     )
 
+    caram_compensation_product_id = fields.Many2one(
+        "product.product",
+        string="Compensation Product",
+        help="Product used for wallet compensation (bonus/discount).",
+    )
+
     caram_wallet_journal_id = fields.Many2one(
         "account.journal",
         string="CarAm Wallet Journal",
         domain="[('type', '=', 'sale')]",
         help="General journal used to post wallet transfers / penalties for CarAm rides.",
+    )
+
+    caram_clearing_journal_id = fields.Many2one(
+        "account.journal",
+        string="CarAm Clearing Journal",
+        domain="[('type', '=', 'general')]",
+        help="General journal used to post wallet clearing entries for CarAm rides.",
     )
 
     caram_commission_product_id = fields.Many2one(
@@ -94,6 +132,24 @@ class ResConfigSettings(models.TransientModel):
         related='company_id.caram_driver_wallet_account_id',
         readonly=False,
     )
+
+    caram_rider_receivable_account_id = fields.Many2one(
+        related='company_id.caram_rider_receivable_account_id',
+        readonly=False,
+    )
+    caram_rider_payable_account_id = fields.Many2one(
+        related='company_id.caram_rider_payable_account_id',
+        readonly=False,
+    )
+    caram_driver_receivable_account_id = fields.Many2one(
+        related='company_id.caram_driver_receivable_account_id',
+        readonly=False,
+    )
+    caram_driver_payable_account_id = fields.Many2one(
+        related='company_id.caram_driver_payable_account_id',
+        readonly=False,
+    )
+
     
     caram_mobile_payment_services_account_id = fields.Many2one(
         related='company_id.caram_mobile_payment_services_account_id',
@@ -114,6 +170,11 @@ class ResConfigSettings(models.TransientModel):
         related="company_id.caram_wallet_journal_id",
         readonly=False,
     )
+    
+    caram_clearing_journal_id = fields.Many2one(
+        related="company_id.caram_clearing_journal_id",
+        readonly=False,
+    )
 
     caram_commission_product_id = fields.Many2one(
         related="company_id.caram_commission_product_id",
@@ -124,7 +185,12 @@ class ResConfigSettings(models.TransientModel):
         related="company_id.caram_fine_product_id",
         readonly=False,
     )
-    
+
+    caram_compensation_product_id = fields.Many2one(
+        related="company_id.caram_compensation_product_id",
+        readonly=False,
+    )
+
     caram_api_base_url = fields.Char(
         config_parameter='caram.api.base.url',
         default='https://staging.caram.app',

@@ -72,18 +72,25 @@ class ContactRegistrationController(http.Controller):
         return bank_account, liability_account, None
 
 
-    def create_driver_coupon_credit_note(self, env, company_id, partner, amount):
-        """Create & post a customer credit note to represent the welcome coupon."""
-        product_coupon = env['product.product'].sudo().with_company(company_id).search(
-            [('is_coupon', '=', True)],
-            limit=1,
-        )
+    def create_driver_coupon_credit_note(self, env, company_id, partner, amount, description, product=None):
+        """Create & post a customer credit note.
+
+        If a product is provided, it will be used directly (e.g. compensation product);
+        otherwise, the legacy 'is_coupon' product will be searched.
+        """
+        product_coupon = product
+        if not product_coupon:
+            product_coupon = env['product.product'].sudo().with_company(company_id).search(
+                [('is_coupon', '=', True)],
+                limit=1,
+            )
         if not product_coupon:
             return False
 
         expense_account = (
             product_coupon.property_account_expense_id
-            or product_coupon.categ_id.property_account_expense_id
+            or product_coupon.categ_id.property_account_expense_categ_id
+            
         )
         if not expense_account:
             expense_account = env['account.account'].sudo().with_company(company_id).search(
@@ -100,10 +107,11 @@ class ContactRegistrationController(http.Controller):
             'invoice_line_ids': [(0, 0, {
                 'product_id': product_coupon.id,
                 'account_id': expense_account.id,
-                'name': 'Welcome Coupon - Service Credit',
+                'name': description,
                 'quantity': 1,
                 'price_unit': amount,
             })],
+            'is_from_api': True,
         })
         
         # Post the credit note to make it effective
@@ -127,6 +135,7 @@ class ContactRegistrationController(http.Controller):
             gender = payload.get("gender")
             contact_type = payload.get("contact_type")
             coupon_value = float(payload.get("coupon_value", 0.0))
+            billing_type = payload.get("billing_type") # subscription,commission
 
             # -------------------- Required Fields --------------------
             if not sub_id:
@@ -141,6 +150,9 @@ class ContactRegistrationController(http.Controller):
 
             if contact_type and contact_type not in ["driver", "rider"]:
                 return request.make_json_response({"error": "Invalid contact_type"}, status=400)
+            
+            if billing_type and billing_type not in ["commission", "subscription"]:
+                return request.make_json_response({"error": "Invalid Billing_type"}, status=400)
 
             # -------------------- Check Existing Contact --------------------
             domain = []
@@ -165,6 +177,7 @@ class ContactRegistrationController(http.Controller):
                     "city": city,
                     "gender": gender,
                     "contact_type": contact_type,
+                    "billing_type": billing_type,
                     "company_id": company_id,
                     "customer_rank": 1,
                     "type": "contact",
@@ -184,9 +197,10 @@ class ContactRegistrationController(http.Controller):
 
             card = env["loyalty.card"].sudo().create({"program_id": program.id, "partner_id": partner.id})
             wallet_balance = 0.0
+            description = "Welcome Coupon - Service Credit"
 
             if coupon_value > 0:
-                credit_note = self.create_driver_coupon_credit_note(env, company_id, partner, coupon_value)
+                credit_note = self.create_driver_coupon_credit_note(env, company_id, partner, coupon_value, description)
                 if credit_note:
                     # -------------------- Create Loyalty History --------------------
                     env["loyalty.history"].sudo().create({
@@ -217,6 +231,49 @@ class ContactRegistrationController(http.Controller):
         except Exception as e:
             return request.make_json_response({"error": str(e)}, status=500)
 
+
+    @http.route('/api/delete_contact', type='http', auth='none', methods=['POST'], csrf=False)
+    def delete_contact(self, **kw):
+        try:
+            payload = json.loads(request.httprequest.data.decode('utf-8'))
+
+            # -------------------- Auth --------------------
+            user = self._authenticate()
+            env = request.env(user=user)
+
+            # -------------------- Input --------------------
+            partner_id = payload.get('odoo_partner_id')
+            if not partner_id:
+                return json.dumps({
+                    "status": "error",
+                    "message": "odoo_partner_id is required"
+                })
+
+            partner = env['res.partner'].browse(int(partner_id))
+
+            # -------------------- Validation --------------------
+            if not partner.exists():
+                return json.dumps({
+                    "status": "error",
+                    "message": "Contact not found"
+                })
+
+            # Optional: prevent deleting companies or important contacts
+            if partner.is_company:
+                return json.dumps({
+                     "status": "error",
+                     "message": "Cannot delete company contacts"
+                 })
+
+            # -------------------- Delete --------------------
+            partner.unlink()
+
+            return request.make_json_response({"status": "success", "message": "Contact deleted successfully"}, status=200)
+
+        except Exception as e:
+            return request.make_json_response({"error": f"Failed to update contact: {str(e)}"}, status=500)
+        
+        
     @http.route("/api/update_contact", type="http", auth="none", methods=["PUT"], csrf=False)
     def update_contact(self, **kw):
         try:
@@ -237,6 +294,7 @@ class ContactRegistrationController(http.Controller):
             city = payload.get("city")
             gender = payload.get("gender")
             contact_type = payload.get("contact_type")
+            billing_type = payload.get("billing_type") # subscription,commission
 
             # ------------------------------------------------------------------
             # Validate required identifier
@@ -281,6 +339,11 @@ class ContactRegistrationController(http.Controller):
                 if contact_type not in ['driver', 'rider']:
                     return request.make_json_response({"error": "Invalid contact_type"}, status=400)
                 update_vals['contact_type'] = contact_type
+            
+            if billing_type:
+                if billing_type not in ['commission', 'subscription']:
+                    return request.make_json_response({"error": "Invalid billing_type"}, status=400)
+                update_vals['billing_type'] = billing_type
 
             if update_vals:
                 partner.sudo().write(update_vals)
@@ -295,13 +358,198 @@ class ContactRegistrationController(http.Controller):
                 "mobile": partner.mobile or "",
                 "city": partner.city or "",
                 "gender": partner.gender or "",
-                "contact_type": partner.contact_type or ""
+                "contact_type": partner.contact_type or "",
+                "billing_type": partner.billing_type or ""
             }
 
             return request.make_json_response({"status": "success", "message": "Contact updated successfully", "data": data}, status=200)
 
         except Exception as e:
             return request.make_json_response({"error": f"Failed to update contact: {str(e)}"}, status=500)
+
+
+    
+    @http.route("/api/get_balance", type="http", auth="none", methods=["POST"], csrf=False)
+    def get_wallet_balance(self):
+        """Return wallet balances from Loyalty Card."""
+        try:
+            payload = json.loads(request.httprequest.data.decode("utf-8"))
+
+            user = self._authenticate()
+            env = self._get_env(user)
+            company_id = user.company_id.id
+
+        # -------------------------
+        # Input Handling
+        # -------------------------
+            raw_partner_id = payload.get("odoo_partner_id")
+            type_raw = payload.get("type") or payload.get("Type")
+
+            partner_pk = None
+            if raw_partner_id not in (None, "", False):
+                try:
+                    partner_pk = int(raw_partner_id)
+                except (TypeError, ValueError):
+                    return request.make_json_response(
+                    {"error": "Invalid odoo_partner_id"}, status=400
+                )
+
+            contact_kind = None
+            if type_raw not in (None, "", False):
+                contact_kind = str(type_raw).strip().lower()
+                if contact_kind not in ("rider", "driver"):
+                    return request.make_json_response(
+                    {"error": 'Invalid type; expected "rider" or "driver"'},
+                    status=400,
+                )
+
+        # -------------------------
+        # Case 1: Specific Partner
+        # -------------------------
+            if partner_pk:
+                partner = env["res.partner"].sudo().browse(partner_pk)
+
+                if not partner.exists() or partner.company_id.id != company_id:
+                    return request.make_json_response(
+                    {"error": "Partner not found or does not belong to this company"},
+                    status=404,
+                )
+
+                card = env["loyalty.card"].sudo().search(
+                [
+                    ("partner_id", "=", partner.id),
+                    ("company_id", "=", company_id),
+                ],
+                limit=1,
+            )
+
+                if not card:
+                    return request.make_json_response(
+                    {"error": "Wallet not found for this partner"}, status=404
+                )
+
+                return request.make_json_response(
+                {
+                    "status": 200,
+                    "type": "single_user",
+                    "data": {
+                        "user_id": partner.id,
+                        "name": partner.name,
+                        "balance": float(card.points or 0.0),
+                    },
+                },
+                status=200,
+            )
+
+        # -------------------------
+        # Case 2: List (filtered or all)
+        # -------------------------
+            domain = [("company_id", "=", company_id)]
+
+            if contact_kind:
+                domain.append(("partner_id.contact_type", "=", contact_kind))
+
+            cards = env["loyalty.card"].sudo().search(domain, order="partner_id")
+
+            data = []
+            for card in cards:
+                partner = card.partner_id
+                data.append({
+                "user_id": partner.id,
+                "name": partner.name,
+                "type": partner.contact_type or "",
+                "balance": float(card.points or 0.0),
+            })
+
+            return request.make_json_response(
+            {
+                "status": 200,
+                "count": len(data),
+                "data": data,
+            },
+            status=200,
+        )
+
+        except Exception as e:
+            return request.make_json_response(
+            {"error": str(e)},
+            status=500,
+        )    
+    
+    def old_get_balance(self, **kw):
+        """Return wallet balances from Loyality Card."""
+        try:
+            payload = json.loads(request.httprequest.data.decode("utf-8"))
+            user = self._authenticate()
+            env = self._get_env(user)
+            company_id = user.company_id.id
+
+            raw_partner_id = payload.get("odoo_partner_id")
+            type_raw = payload.get("type") or payload.get("Type")
+            contact_kind = str(type_raw).strip().lower() if type_raw is not None and type_raw != "" else None
+
+            if raw_partner_id is not None:
+                try:
+                    partner_pk = int(raw_partner_id)
+                except (TypeError, ValueError):
+                    return request.make_json_response({"error": "Invalid odoo_partner_id"}, status=400)
+
+                partner = env["res.partner"].sudo().browse(partner_pk)
+                if not partner.exists() or partner.company_id.id != company_id:
+                    return request.make_json_response(
+                        {"error": "Partner not found or does not belong to this company"},
+                        status=404,
+                    )
+
+                card = env["loyalty.card"].sudo().search(
+                    [("partner_id", "=", partner.id), ("company_id", "=", company_id)],
+                    limit=1,
+                )
+                if not card:
+                    return request.make_json_response({"error": "Wallet not found for this partner"}, status=404)
+
+                body = {
+                    "status": 200,
+                    "type": "single_user",
+                    "data": {
+                        "user_id": partner.id,
+                        "name": partner.name,
+                        "balance": float(card.points or 0.0),
+                    },
+                }
+                return request.make_json_response(body, status=200)
+
+            if contact_kind:
+                if contact_kind not in ("rider", "driver"):
+                    return request.make_json_response(
+                        {"error": 'Invalid type; expected "rider" or "driver"'},
+                        status=400,
+                    )
+                domain = [
+                    ("company_id", "=", company_id),
+                    ("partner_id.contact_type", "=", contact_kind),
+                ]
+            else:
+                domain = [("company_id", "=", company_id)]
+
+            cards = env["loyalty.card"].sudo().search(domain, order="partner_id")
+            rows = []
+            for card in cards:
+                partner = card.partner_id
+                rows.append({
+                    "user_id": partner.id,
+                    "name": partner.name,
+                    "type": partner.contact_type or "",
+                    "balance": float(card.points or 0.0),
+                })
+
+            return request.make_json_response(
+                {"status": 200, "count": len(rows), "data": rows},
+                status=200,
+            )
+
+        except Exception as e:
+            return request.make_json_response({"error": str(e)}, status=500)
 
     @http.route("/api/add_wallet_transaction", type="http", auth="none", methods=["POST"], csrf=False)
     def add_wallet_transaction(self, **kw):
@@ -315,6 +563,7 @@ class ContactRegistrationController(http.Controller):
             odoo_partner_id = payload.get("odoo_partner_id")
             transaction_id = payload.get("transaction_id")
             payment_method_type = payload.get("payment_method_type")
+            salesperson_id = payload.get("salesperson_id")
             transaction_type = payload.get("transaction_type")
             amount = payload.get("amount") 
             reference = payload.get("reference")
@@ -334,6 +583,11 @@ class ContactRegistrationController(http.Controller):
                 return request.make_json_response({"error": "Invalid transaction_type"}, status=400)
             if not amount or amount <= 0:
                 return request.make_json_response({"error": "amount is required and must be greater than 0"}, status=400)
+            if payment_method_type == "salesperson" and not salesperson_id:
+                return request.make_json_response(
+                    {"error": "salesperson_id is required for payment_method_type = 'salesperson'"},
+                    status=400,
+                )
 
             # -------------------- Find Partner --------------------
             partner = env['res.partner'].sudo().browse(odoo_partner_id)
@@ -362,18 +616,73 @@ class ContactRegistrationController(http.Controller):
               
                 if payment_method_type == 'points':
                     move_credit = wallet.create_points_credit_note(env, company_id, partner, amount)
+                    
+                elif payment_method_type == 'salesperson':
+                    salesperson = env['res.partner'].sudo().browse(salesperson_id)
+                    if not salesperson.exists():
+                        return request.make_json_response(
+                            {"error": "Salesperson not found or does not belong to this company"},
+                            status=404,
+                        )
+
+                    wallet_receivable = partner.with_company(company_id).property_account_receivable_id
+                    if not wallet_receivable:
+                        return request.make_json_response(
+                            {"error": "Wallet partner has no receivable account configured"},
+                            status=500,
+                        )
+
+                    journal = env['account.journal'].sudo().with_company(company_id).search(
+                        [('company_id', '=', company_id), ("wallet_type_id", "=", payment_method_type)],
+                        limit=1,
+                    )
+
+                    if not journal:
+                        return request.make_json_response(
+                            {"error": "No general journal found to post wallet salesperson entries"},
+                            status=500,
+                        )
+
+                    move_vals = {
+                        'move_type': 'entry',
+                        'journal_id': journal.id,
+                        'date': fields.Date.today(),
+                        'ref': f'Wallet top-up via Salesperson {salesperson.display_name}',
+                        'is_from_api': True,
+                        'line_ids': [
+                            (0, 0, {
+                                'name': ref or 'Wallet top-up via Salesperson',
+                                'partner_id': salesperson.id,
+                                'account_id': salesperson.property_account_receivable_id.id,
+                                'debit': amount,
+                                'credit': 0.0,
+                            }),
+                            (0, 0, {
+                                'name': ref or 'Wallet top-up via Salesperson',
+                                'partner_id': partner.id,
+                                'account_id': wallet_receivable.id,
+                                'debit': 0.0,
+                                'credit': amount,
+                            }),
+                        ],
+                    }
+
+                    move = env['account.move'].sudo().with_company(company_id).create(move_vals)
+                    if should_post:
+                        move.action_post()
+                    journal_transaction_id = transaction_id
                 else:
                     move, error = wallet._create_payment(
-                    partner,
-                    amount,
-                    payment_method_type,
-                    ref,
-                    should_post=should_post,
-                    transaction_id=transaction_id,
-                    image_url=image_url,
-                    bank=bank,
-                    account_number=account_number,
-                )
+                        partner,
+                        amount,
+                        payment_method_type,
+                        ref,
+                        should_post=should_post,
+                        transaction_id=transaction_id,
+                        image_url=image_url,
+                        bank=bank,
+                        account_number=account_number,
+                    )
                     if move:
                         journal_transaction_id = move.caram_transaction_id
                     if error:
@@ -396,7 +705,7 @@ class ContactRegistrationController(http.Controller):
             
                 if move:
                     transaction_vals.update({
-                    "order_model": "account.payment",
+                    "order_model": move._name,
                     "order_id": move.id,
                 })
                 elif move_credit:
@@ -458,11 +767,16 @@ class ContactRegistrationController(http.Controller):
             partner_id = payload.get("odoo_partner_id")
             amount = float(payload.get("amount", 0))
             transaction_id = payload.get("transaction_id")
+            transaction_type = payload.get("transaction_type")
             bank = payload.get("bank")
             account_number = payload.get("account_number")
-            note = payload.get("note", "")
+            note = payload.get("note") or ""
             
             # -------------------- Validate required fields --------------------
+            if not transaction_type:
+                return request.make_json_response({"error": "transaction_type is required"}, status=400)
+            if transaction_type not in ["direct", "bank_transfer"]:
+                return request.make_json_response({"error": "Invalid transaction_type"}, status=400)
             if not partner_id:
                 return request.make_json_response({"error": "odoo_partner_id is required"}, status=400)
             if not amount or amount <= 0:
@@ -501,8 +815,8 @@ class ContactRegistrationController(http.Controller):
             move = None
             if bank_account and liability_account:
                 ref = note
-                should_post = False
-                state = 'draft'
+                should_post = (transaction_type == "direct")
+                state = 'posted' if should_post else 'draft'
                 payment_method_type = 'bank'
                 image_url = ''
               
@@ -557,6 +871,403 @@ class ContactRegistrationController(http.Controller):
             return request.make_json_response({"error": f"Failed to create withdrawal transaction: {str(e)}"}, status=500)
 
 
+    @http.route("/api/compensation", type="http", auth="none", methods=["POST"], csrf=False)
+    def wallet_compensation(self, **kw):
+        try:
+            payload = json.loads(request.httprequest.data.decode("utf-8"))
+
+            user = self._authenticate()
+            env = self._get_env(user)
+            company = user.company_id
+            company_id = company.id
+
+            odoo_partner_id = payload.get("odoo_partner_id")
+            comp_type = (payload.get("type") or "").strip().lower()
+            amount = payload.get("amount")
+            note = payload.get("note") or ""
+
+            # -------------------- Validate input --------------------
+            if not amount:
+                return request.make_json_response({"error": "amount is required"}, status=400)
+
+            if not odoo_partner_id:
+                return request.make_json_response(
+                    {"status": 400, "message": "odoo_partner_id is required"}, status=400
+                )
+
+            if comp_type not in ["bonus", "discount", "return_bonus", "coupon"]:
+                return request.make_json_response(
+                    {"status": 400, "message": "Invalid type (must be 'bonus', 'coupon', 'return_bonus' or 'discount')"},
+                    status=400,
+                )
+
+            partner = env["res.partner"].sudo().browse(odoo_partner_id)
+            if not partner.exists():
+                return request.make_json_response(
+                    {"status": 404, "message": "Partner not found or does not belong to this company"},
+                    status=404,
+                )
+
+            # Wallet
+            card = (
+                env["loyalty.card"]
+                .sudo()
+                .search(
+                    [("partner_id", "=", partner.id), ("company_id", "=", company_id)],
+                    limit=1,
+                )
+            )
+            if not card:
+                return request.make_json_response(
+                    {"status": 404, "message": "Wallet not found for this partner"}, status=404
+                )
+
+            # Compensation product
+            if comp_type == "return_bonus":
+                product = env['product.product'].sudo().with_company(company_id).search(
+                [('is_coupon', '=', True)],
+                limit=1,
+                )
+            else:
+                product = company.caram_compensation_product_id
+                if not product:
+                    return request.make_json_response(
+                    {"status": 500, "message": "Compensation product not configured in company settings"},
+                    status=500,
+                )
+
+            expense_account = (
+                product.property_account_expense_id
+                or product.categ_id.property_account_expense_categ_id
+            )
+            if not expense_account:
+                return request.make_json_response(
+                    {"status": 500, "message": "No expense account configured for compensation product"},
+                    status=500,
+                )
+
+            description = f"Wallet compensation ({comp_type}) {note}"
+
+            # -------------------- Accounting entry --------------------
+            if comp_type == "return_bonus":
+                # Bonus -> credit note using existing helper and compensation product expense account
+                journal = env["account.journal"].sudo().with_company(company_id).search(
+                    [("company_id", "=", company_id), ("type", "=", "general")],
+                    limit=1,
+                    )
+                if not journal:
+                    raise UserError(_("No journal found to post CarAm wallet transfer entries."))
+
+                wallet_receivable = partner.with_company(company_id).property_account_receivable_id
+                if not wallet_receivable:
+                    return request.make_json_response(
+                            {"error": "Wallet partner has no receivable account configured"},
+                            status=500,
+                        )
+                ref = f"Return Bonus {partner.name} wallet transfer"
+                move_vals = {
+                    "move_type": "entry",
+                    "journal_id": journal.id,   
+                    "date": fields.Date.today(),
+                    "ref": ref,
+                    "is_from_api": True,
+                    "line_ids": [
+                        (0, 0, {
+                    "name": ref,
+                    "partner_id": partner.id,
+                    'account_id': wallet_receivable.id,
+                    "debit": amount,
+                    "credit": 0.0,
+                        }),
+                        (0, 0, {
+                    "name": ref,
+                    "partner_id": partner.id,
+                    'product_id': product.id,
+                    'account_id': expense_account.id,
+                    "debit": 0.0,
+                    "credit": amount,
+                        }),
+                        ],
+                     }
+
+                journal_entry = env["account.move"].sudo().with_company(company_id).create(move_vals)
+                journal_entry.action_post()
+                move = journal_entry
+
+            elif comp_type == "coupon":
+                # Bonus -> credit note using existing helper and compensation product expense account
+                move = self.create_driver_coupon_credit_note(
+                    env, company_id, partner, amount, description
+                )
+                if not move:
+                    return request.make_json_response(
+                        {"status": 500, "message": "Failed to create welcome coupon credit note"},
+                        status=500,
+                    )
+                
+            elif comp_type == "bonus":
+                # Bonus -> credit note using existing helper and compensation product expense account
+                move = self.create_driver_coupon_credit_note(
+                    env, company_id, partner, amount, description, product=product
+                )
+                if not move:
+                    return request.make_json_response(
+                        {"status": 500, "message": "Failed to create compensation credit note"},
+                        status=500,
+                    )
+            else:
+                # Discount -> invoice entry using _create_invoice_from_lines and expense account
+                invoice_line_vals = {
+                    "product_id": product.id,
+                    "account_id": expense_account.id,
+                    "name": description,
+                    "quantity": 1,
+                    "price_unit": amount,
+                }
+                move = card._create_invoice_from_lines(partner, [invoice_line_vals])
+
+            # -------------------- Wallet & loyalty history --------------------
+            balance_before = card.caram_get_posted_balance()
+            delta = amount if comp_type in ["bonus","coupon"] else -amount
+
+            tx_vals = {
+                "card_id": card.id,
+                "description": description,
+                "issued": delta,
+                "used": 0.0,
+                "status": "posted",
+                "order_model": "account.move",
+                "order_id": move.id,
+            }
+            tx = env["loyalty.history"].sudo().create(tx_vals)
+
+            balance_after = card.caram_get_posted_balance()
+            card.sudo().write({"points": balance_after})
+
+            response = {
+                "status": 200,
+                "journal_entry_id": move.id,
+                "partner_id": partner.id,
+                "wallet_id": card.id,
+                "type": comp_type,
+                "amount": amount,
+                "balance_before": balance_before,
+                "balance_after": balance_after,
+                "loyalty_history_id": tx.id,
+                "message": "Compensation applied successfully",
+            }
+            return request.make_json_response(response, status=200)
+
+        except Exception as e:
+            return request.make_json_response(
+                {"status": 500, "message": f"Internal server error: {str(e)}"},
+                status=500,
+            )
+
+    @http.route("/api/wallet_clearing", type="http", auth="none", methods=["POST"], csrf=False)
+    def wallet_clearing(self, **kw):
+        try:
+            payload = json.loads(request.httprequest.data.decode("utf-8"))
+            user = self._authenticate()
+            env = self._get_env(user)
+            company_id = user.company_id.id
+            company = env["res.company"].sudo().browse(company_id)
+
+            rider_id = payload.get("odoo_rider_id")
+            driver_id = payload.get("odoo_driver_id")
+            amount = payload.get("amount")
+            
+            if not amount:
+                return request.make_json_response({"error": "amount is required"}, status=400)
+            
+            if not rider_id or not driver_id:
+                return request.make_json_response(
+                    {
+                        "status": 400,
+                        "message": "odoo_rider_id and odoo_driver_id are required",
+                    },
+                    status=400,
+                )
+
+            rider = env["res.partner"].sudo().browse(rider_id)
+            driver = env["res.partner"].sudo().browse(driver_id)
+            if not rider.exists():
+                return request.make_json_response(
+                    {"status": 404, "message": "Rider not found"}, status=404
+                )
+            if not driver.exists():
+                return request.make_json_response(
+                    {"status": 404, "message": "Driver not found"}, status=404
+                )
+
+            # Wallet accounts from company configuration
+            rider_wallet_account = company.caram_rider_wallets_account_id
+            driver_wallet_account = company.caram_driver_wallet_account_id
+            if not rider_wallet_account or not driver_wallet_account:
+                return request.make_json_response(
+                    {
+                        "status": 500,
+                        "message": "Wallet accounts not configured on company",
+                    },
+                    status=500,
+                )
+
+            journal = company.caram_clearing_journal_id or env[
+                "account.journal"
+            ].sudo().search(
+                [("company_id", "=", company_id), ("type", "=", "general")], limit=1
+            )
+            if not journal:
+                return request.make_json_response(
+                    {
+                        "status": 500,
+                        "message": "No journal found for wallet clearing entries",
+                    },
+                    status=500,
+                )
+
+            base_amount = abs(amount)
+            if amount > 0:
+                # Rider -> Driver
+                debit_partner = rider
+                debit_account = rider_wallet_account
+                credit_partner = driver
+                credit_account = driver_wallet_account
+                direction = "rider_to_driver"
+            else:
+                # Driver -> Rider
+                debit_partner = driver
+                debit_account = driver_wallet_account
+                credit_partner = rider
+                credit_account = rider_wallet_account
+                direction = "driver_to_rider"
+
+            ref = f"Wallet clearing {direction.replace('_', ' ')}"
+            move_vals = {
+                "move_type": "entry",
+                "journal_id": journal.id,
+                "date": fields.Date.today(),
+                "ref": ref,
+                "is_from_api": True,
+                "line_ids": [
+                    (
+                        0,
+                        0,
+                        {
+                            "name": ref,
+                            "partner_id": debit_partner.id,
+                            "account_id": debit_account.id,
+                            "debit": base_amount,
+                            "credit": 0.0,
+                        },
+                    ),
+                    (
+                        0,
+                        0,
+                        {
+                            "name": ref,
+                            "partner_id": credit_partner.id,
+                            "account_id": credit_account.id,
+                            "debit": 0.0,
+                            "credit": base_amount,
+                        },
+                    ),
+                ],
+            }
+
+            move = (
+                env["account.move"]
+                .sudo()
+                .with_company(company_id)
+                .create(move_vals)
+            )
+            move.action_post()
+
+            # Wallet balance updates
+            rider_card = (
+                env["loyalty.card"]
+                .sudo()
+                .search(
+                    [("partner_id", "=", rider.id), ("company_id", "=", company_id)],
+                    limit=1,
+                )
+            )
+            driver_card = (
+                env["loyalty.card"]
+                .sudo()
+                .search(
+                    [("partner_id", "=", driver.id), ("company_id", "=", company_id)],
+                    limit=1,
+                )
+            )
+            if not rider_card or not driver_card:
+                return request.make_json_response(
+                    {"status": 404, "message": "Wallet not found for rider or driver"},
+                    status=404,
+                )
+
+            if amount > 0:
+                # rider.wallet -= amount, driver.wallet += amount
+                rider_card.caram_withdraw(
+                    base_amount,
+                    commission_amount=0.0,
+                    fine_amount=0.0,
+                    description=f"Wallet clearing to driver {driver.id}",
+                    status="posted",
+                    driver=driver,
+                    should_create_invoice=False,
+                    order_model="account.move",
+                    order_id=move.id,
+                )
+                driver_card.caram_addwallet(
+                    base_amount,
+                    description=f"Wallet clearing from rider {rider.id}",
+                    status="posted",
+                    driver=driver,
+                    should_create_payment=False,
+                    order_model="account.move",
+                    order_id=move.id,
+                )
+            else:
+                # driver.wallet -= amount_abs, rider.wallet += amount_abs
+                driver_card.caram_withdraw(
+                    base_amount,
+                    commission_amount=0.0,
+                    fine_amount=0.0,
+                    description=f"Wallet clearing to rider {rider.id}",
+                    status="posted",
+                    driver=driver,
+                    should_create_invoice=False,
+                    order_model="account.move",
+                    order_id=move.id,
+                )
+                rider_card.caram_addwallet(
+                    base_amount,
+                    description=f"Wallet clearing from driver {driver.id}",
+                    status="posted",
+                    driver=rider,
+                    should_create_payment=False,
+                    order_model="account.move",
+                    order_id=move.id,
+                )
+
+            response = {
+                "status": 200,
+                "journal_entry_id": move.id,
+                "rider_id": rider.id,
+                "driver_id": driver.id,
+                "amount": amount,
+                "direction": direction,
+                "message": "Wallet clearing completed successfully",
+            }
+            return request.make_json_response(response, status=200)
+
+        except Exception as e:
+            return request.make_json_response(
+                {"status": 500, "message": f"Internal server error: {str(e)}"},
+                status=500,
+            )
+
     @http.route("/api/ride/pay", type="http", auth="none", methods=["POST"], csrf=False)
     def pay_ride(self, **kw):
         try:
@@ -567,6 +1278,8 @@ class ContactRegistrationController(http.Controller):
             fare_amount = float(payload.get("fare_amount"))
             ride_id = payload.get("ride_id")
             wallet_paid = payload.get("wallet_paid", 0.0)
+            coupon_value = payload.get("coupon_value", 0.0)
+            coupon_description = payload.get("coupon_description")
             cash_paid = payload.get("cash_paid", 0.0)
             commission_amount = payload.get("commission_amount", 0.0)
             penalties = payload.get("penalties", []) or []
@@ -632,6 +1345,43 @@ class ContactRegistrationController(http.Controller):
                     penalties=penalties,
                     payment_mode=payment_mode,
                 )
+                if coupon_value>0:
+                    # Wallet
+                    card = (env["loyalty.card"].sudo().search( [("partner_id", "=", driver.id), ("company_id", "=", company_id)],
+                    limit=1,))
+                    if not card:
+                        return request.make_json_response(
+                            {"status": 404, "message": "Wallet not found for this partner"}, status=404
+                          )
+
+                    # Bonus -> credit note using existing helper and compensation product expense account
+                    move = self.create_driver_coupon_credit_note(
+                    env, company_id, driver, coupon_value, coupon_description
+                )
+                    if not move:
+                        return request.make_json_response(
+                        {"status": 500, "message": "Failed to create welcome coupon credit note"},
+                        status=500,
+                    )
+                     # -------------------- Wallet & loyalty history --------------------
+                    balance_before = card.caram_get_posted_balance()
+                    delta = coupon_value
+
+                    tx_vals = {
+                "card_id": card.id,
+                "description": coupon_description,
+                "issued": delta,
+                "used": 0.0,
+                "status": "posted",
+                "order_model": "account.move",
+                "order_id": move.id,
+            }
+                    tx = env["loyalty.history"].sudo().create(tx_vals)
+
+                    balance_after = card.caram_get_posted_balance()
+                    card.sudo().write({"points": balance_after})
+
+            
             except UserError as e:
                 msg = str(e)
                 if "Insufficient wallet balance" in msg:

@@ -62,6 +62,7 @@ class SubscriptionController(http.Controller):
             if not subscription_type:
                 return request.make_json_response({'error': 'subscription_type is required'}, status=400)
 
+            disc = payload.get('disc')
             price = payload.get('Price')
             if price is None:
                 return request.make_json_response({'error': 'Price is required'}, status=400)
@@ -80,7 +81,7 @@ class SubscriptionController(http.Controller):
             if not end_date:
                 return request.make_json_response({'error': 'end_date is required'}, status=400)
 
-            if subscription_type not in ['private', 'pinky', 'vip', 'van', 'taxi', 'other']:
+            if subscription_type not in ['private', 'pinky', 'vip', 'van', 'taxi', 'other', 'laxuary']:
                 return request.make_json_response({'error': 'Invalid subscription_type'}, status=400)
 
             # Check for existing subscription
@@ -88,8 +89,8 @@ class SubscriptionController(http.Controller):
                 ('caram_subscription_id', '=', caram_subscription_id),
                 ('plan_id', '!=', False),  # Only check orders with plan_id (subscriptions)
             ], limit=1)
-            # if existing:
-            #     return request.make_json_response({'error': 'Subscription with this caram_subscription_id already exists'}, status=409)
+            if existing:
+                return request.make_json_response({'error': 'Subscription with this caram_subscription_id already exists'}, status=409)
 
             # # Get partner
             partner = env['res.partner'].sudo().browse(odoo_partner_id)
@@ -102,6 +103,7 @@ class SubscriptionController(http.Controller):
                 caram_subscription_id=caram_subscription_id,
                 subscription_type=subscription_type,
                 price=price,
+                disc=disc,
                 start_date=start_date,
                 end_date=end_date,
                 company_id=company_id,

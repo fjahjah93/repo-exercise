@@ -44,6 +44,40 @@
                                            options="{'no_create': True, 'no_create_edit': True}"/>
                                 </div>
                             </div>
+
+                            <div class="row mt16">
+                                <label string="Rider Receivable (Partner Property)" for="caram_rider_receivable_account_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <div class="col-lg-12">
+                                    <field name="caram_rider_receivable_account_id" class="o_light_label"
+                                           options="{'no_create': True, 'no_create_edit': True}"/>
+                                </div>
+                            </div>
+                            <div class="row mt16">
+                                <label string="Rider Payable (Partner Property)" for="caram_rider_payable_account_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <div class="col-lg-12">
+                                    <field name="caram_rider_payable_account_id" class="o_light_label"
+                                           options="{'no_create': True, 'no_create_edit': True}"/>
+                                </div>
+                            </div>
+                            <div class="row mt16">
+                                <label string="Driver Receivable (Partner Property)" for="caram_driver_receivable_account_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <div class="col-lg-12">
+                                    <field name="caram_driver_receivable_account_id" class="o_light_label"
+                                           options="{'no_create': True, 'no_create_edit': True}"/>
+                                </div>
+                            </div>
+                            <div class="row mt16">
+                                <label string="Driver Payable (Partner Property)" for="caram_driver_payable_account_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <div class="col-lg-12">
+                                    <field name="caram_driver_payable_account_id" class="o_light_label"
+                                           options="{'no_create': True, 'no_create_edit': True}"/>
+                                </div>
+                            </div>
+                
                             
                             <div class="row mt16">
                                 <label string="Mobile Payment Services Account" for="caram_mobile_payment_services_account_id"
@@ -82,10 +116,28 @@
                             </div>
 
                             <div class="row mt16">
+                                <label string="Compensation Product" for="caram_compensation_product_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <div class="col-lg-12">
+                                    <field name="caram_compensation_product_id" class="o_light_label"
+                                           options="{'no_create': True, 'no_create_edit': True}"/>
+                                </div>
+                            </div>
+
+                            <div class="row mt16">
                                 <label string="CarAm Wallet Journal" for="caram_wallet_journal_id"
                                        class="col-lg-3 o_light_label"/>
                                 <div class="col-lg-12">
                                     <field name="caram_wallet_journal_id" class="o_light_label"
+                                           options="{'no_create': True, 'no_create_edit': True}"/>
+                                </div>
+                            </div>
+
+                            <div class="row mt16">
+                                <label string="CarAm Clearing Journal" for="caram_clearing_journal_id"
+                                       class="col-lg-3 o_light_label"/>
+                                <div class="col-lg-12">
+                                    <field name="caram_clearing_journal_id" class="o_light_label"
                                            options="{'no_create': True, 'no_create_edit': True}"/>
                                 </div>
                             </div>

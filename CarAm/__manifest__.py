@@ -27,7 +27,6 @@
         'security/ir.model.access.csv',
         'views/res_partner_views.xml',
         'views/loyality_history_views.xml',
-        'wizards/loyalty_history_wizard_views.xml',
         'views/res_config_settings_views.xml',
         'views/sale_subscription_plan_views.xml',
         'views/account_journal_views.xml',

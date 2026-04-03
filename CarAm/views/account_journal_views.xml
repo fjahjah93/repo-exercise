@@ -8,8 +8,9 @@
             <field name="code" position="after">
                 <field name="is_used_for_subscriptions"/>
                 <field name="journal_sub_type"/>
+                <field name="wallet_type_id"/>
+                
             </field>
         </field>
     </record>
 </odoo>
-
