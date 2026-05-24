@@ -2,7 +2,8 @@ from odoo import fields, http, _
 from odoo.http import request
 from odoo.exceptions import UserError
 import json
-
+import logging
+_logger = logging.getLogger(__name__)
 
 class ContactRegistrationController(http.Controller):
     
@@ -1461,15 +1462,18 @@ class ContactRegistrationController(http.Controller):
                     delta = coupon_value
 
                     tx_vals = {
-                "card_id": card.id,
-                "description": coupon_description,
-                "issued": delta,
-                "used": 0.0,
-                "status": "posted",
-                "order_model": "account.move",
-                "order_id": move.id,
-                "transaction_date": accounting_date or fields.Datetime.now(),
-            }
+                        "card_id": card.id,
+                        "description": coupon_description,
+                        "issued": delta,
+                        "used": 0.0,
+                        "status": "posted",
+                        "order_model": "account.move",
+                        "order_id": move.id,
+                        "transaction_date": accounting_date or fields.Datetime.now(),
+                    }
+                    _logger.info("------------accounting_date----------- %s", accounting_date)
+                    _logger.info("------------fields.Datetime.now()----------- %s", fields.Datetime.now())
+                    _logger.info("------------tx_vals----------- %s", tx_vals)
                     tx = env["loyalty.history"].sudo().create(tx_vals)
 
                     balance_after = card.caram_get_posted_balance()
