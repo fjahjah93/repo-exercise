@@ -155,17 +155,17 @@ class AccountPayment(models.Model):
         api_url = self._get_caram_api_url().replace('change-transaction-status', 'cash-collection')
         ttype = 'credit' if self.payment_type == 'inbound' else 'debit'
         payload = {
-            
-                    'odoo_partner_id': self.partner_id.id,
-                    'type': ttype, #credit , debit
-                    'amount': self.amount,
-                    'date': self.date.strftime('%Y-%m-%d'),
-                    'note': "Cash Collection Request from Odoo"+ self.memo if self.memo else "",
-                
-            }
+            'odoo_partner_id': self.partner_id.id,
+            'type': ttype, #credit , debit
+            'amount': self.amount,
+            'date': self.date.strftime('%Y-%m-%d'),
+            'note': "Cash Collection Request from Odoo"+ self.memo if self.memo else "",        
+        }
 
         try:
-            response = requests.post(api_url, json=payload, timeout=10, headers=self._get_caram_api_headers())
+            response = requests.post(
+                api_url, json=payload, timeout=10, headers=self._get_caram_api_headers()
+            )
             response.raise_for_status()
             self.message_post(
                     body="✅ Connection to API successful.",
@@ -181,6 +181,13 @@ class AccountPayment(models.Model):
                     )
             raise UserError(f'Failed to send cash collection request to CarAm: {str(e)}')
     
+    def action_send_caram_cash_collection(self):
+        """Button: send cash collection to CarAm (manual)."""
+        self.ensure_one()
+        if self.state in ('draft', 'canceled'):
+            raise UserError('Payment must be posted before sending cash collection.')
+        return self._send_caram_cash_collection()
+
     def _send_caram_status_update(self, status):
         """Send status update to CarAm platform."""
         self.ensure_one()
@@ -217,7 +224,6 @@ class AccountPayment(models.Model):
             if move.caram_transaction_id:
                 try:
                     move._send_caram_status_update('confirm')
-                    move._send_caram_cash_collection()
                     transaction = self.env['loyalty.history'].sudo().search(
                         [('order_id', '=', move.id)],
                           limit=1
