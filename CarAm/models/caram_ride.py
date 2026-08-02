@@ -21,6 +21,8 @@ class CaramCompensationProductConfig(models.Model):
             ("fees", "Fees"),
             ("discount", "Discount"),
             ("expense", "Expense"),
+            ("fine", "Fine"),
+            ("commission", "Commission"),
         ],
         required=True,
     )
@@ -65,6 +67,69 @@ class CaramRide(models.Model):
     paid_at = fields.Datetime(readonly=True)
 
 
+    def _create_expense_bill(self, driver, amount, company_id, accounting_date=None):
+        self.ensure_one()
+        amount = float(amount or 0.0)
+        comp_type = "expense"
+
+        config = self.env["caram.compensation.product.config"].sudo().search(
+            [("company_id", "=", company_id), ("type", "=", comp_type)],
+            limit=1,
+        )
+        # إذا مالقيتش، دور على إعداد الأب (الشركة الأم)
+        if not config:
+            config = self.env["caram.compensation.product.config"].sudo().search(
+                [("company_id", "parent_of", company_id), ("type", "=", comp_type)],
+                limit=1,
+            )
+
+        if not config or not config.product_id:
+            raise UserError(_(
+                "Compensation product not configured for type '%s' on company id '%s'."
+            ) % (comp_type, company_id))
+
+        product = config.product_id.with_company(company_id)
+
+        expense_account = (
+            product.property_account_expense_id
+            or product.categ_id.property_account_expense_categ_id
+        )
+        if not expense_account:
+            raise UserError(_("No expense account configured for compensation product."))
+
+        journal = self.env["account.journal"].sudo().with_company(company_id).search(
+            [("type", "=", "purchase"),
+            '|', ("company_id", "=", company_id), ("company_id", "parent_of", company_id)],
+            limit=1,
+        )
+        if not journal:
+            raise UserError(_("Purchase journal is not configured for this company."))
+
+        ref = f"Ride {self.ride_id} expense amount {amount} for external driver {driver.name}"
+        move_date = accounting_date or fields.Date.context_today(self)
+
+        move_vals = {
+            "move_type": "in_invoice",
+            "company_id": company_id,
+            "journal_id": journal.id,
+            "invoice_date": move_date,
+            "partner_id": driver.id,
+            "ref": ref,
+            "invoice_line_ids": [
+                (0, 0, {
+                    "name": ref,
+                    "product_id": product.id,
+                    "quantity": 1,
+                    "price_unit": amount,
+                    "account_id": expense_account.id,
+                }),
+            ],
+        }
+
+        bill = self.env["account.move"].sudo().with_company(company_id).create(move_vals)
+        bill.action_post()
+        return bill
+
     def _create_expense_journal_entry(self, driver, amount, accounting_date=None):
         self.ensure_one()
         amount = float(amount or 0.0)
@@ -103,7 +168,7 @@ class CaramRide(models.Model):
         return journal_entry
 
     def _create_journal_entry(
-        self, driver, rider, amount, accounting_date=None, note_from_api=False, api_payload=False
+        self, driver, rider, amount, accounting_date=None, note_from_api=False, api_payload=False , company_id=None
     ):
         """Create & post a journal entry transferring wallet amount rider -> driver.
 
@@ -115,10 +180,10 @@ class CaramRide(models.Model):
             raise UserError(_("amount must be greater than 0"))
 
         rider_wallet_account = self.rider_id.with_company(
-            self.company_id.id
+            company_id or self.company_id.id
         ).property_account_receivable_id
         driver_wallet_account = self.driver_id.with_company(
-            self.company_id.id
+            company_id or self.company_id.id
         ).property_account_receivable_id
         if not rider_wallet_account:
             raise UserError(_("Rider has no receivable account."))
@@ -126,19 +191,27 @@ class CaramRide(models.Model):
             raise UserError(_("Driver has no receivable account."))
 
         if self.env.context.get("caram_is_airport_trip"):
-            journal = self.company_id.caram_airport_journal_id
+            
+            journal = self.env["account.journal"].sudo().with_company(company_id).search(
+                                    [("type", "=", "sale"), ("is_airport_journal", "!=", False),
+                                    '|', ('company_id', '=', company_id or self.company_id.id), 
+                                    ('company_id', 'parent_of', company_id or self.company_id.id)
+                                    ], limit=1
+                                )
             if not journal:
-                raise UserError(_("Airport journal is not configured for this company."))
+                raise UserError(_("Airport journal is not configured for this company. create journal entry"+company_id))
         else:
             journal = self.env["account.journal"].sudo().with_company(self.company_id.id).search(
-                [("type", "=", "general"), ("company_id", "=", self.company_id.id)],
+                [("type", "=", "general"),  
+            '|', ('company_id', '=', company_id or self.company_id.id), 
+            ('company_id', 'parent_of', company_id or self.company_id.id)],
                 limit=1,
             )
             if not journal:
                 journal = self.env["account.journal"].sudo().with_company(self.company_id.id).search(
                     [
                         ("type", "=", "general"),
-                        ("company_id", "parent_of", self.company_id.id),
+                        ("company_id", "parent_of", company_id or self.company_id.id),
                     ],
                     limit=1,
                 )
@@ -183,8 +256,7 @@ class CaramRide(models.Model):
         self.ensure_one()
         return self.env["loyalty.card"].sudo().search(
             [
-                ("partner_id", "=", partner.id),
-                ("company_id", "=", self.company_id.id),
+                ("partner_id", "=", partner.id)
             ],
             limit=1,
         )
@@ -204,14 +276,13 @@ class CaramRide(models.Model):
     # ---------------------------
     # Main payment logic
     # ---------------------------
-    def action_pay_ride(self, *,fare_amount, wallet_paid, cash_paid, commission_amount, penalties, payment_mode, accounting_date=None, note_from_api=False, api_payload=False, is_airport_trip=False, driver_type=None, expense_amount=0.0):
+    def action_pay_ride(self, *,fare_amount, wallet_paid, cash_paid, commission_amount, penalties, payment_mode, accounting_date=None, note_from_api=False, api_payload=False, is_airport_trip=False, driver_type=None, expense_amount=0.0, company_id=None):
         self.ensure_one()
         self = self.with_company(self.company_id.id).with_context(
             allowed_company_ids=[self.company_id.id],
             caram_is_airport_trip=is_airport_trip,
         )
-        if is_airport_trip and not self.company_id.caram_airport_journal_id:
-            raise UserError(_("Airport journal is not configured for this company."))
+        
         if self.state == "paid":
             raise UserError(_("Ride already paid."))
 
@@ -276,6 +347,7 @@ class CaramRide(models.Model):
                 accounting_date=doc_date,
                 note_from_api=api_note,
                 api_payload=stored_api_payload,
+                company_id=company_id,
             )
             if rider_penalty_amount > 0:
                 rider_card.caram_withdraw(
@@ -289,6 +361,7 @@ class CaramRide(models.Model):
                     accounting_date=doc_date,
                     note_from_api=api_note,
                     api_payload=stored_api_payload,
+                    company_id=company_id,
                 )
 
             rider_wallet_delta = 0.0
@@ -318,6 +391,7 @@ class CaramRide(models.Model):
                 accounting_date=doc_date,
                 note_from_api=api_note,
                 api_payload=stored_api_payload,
+                company_id=company_id,
             )
             if rider_penalty_amount > 0:
                 rider_card.caram_withdraw(
@@ -331,6 +405,7 @@ class CaramRide(models.Model):
                     accounting_date=doc_date,
                     note_from_api=api_note,
                     api_payload=stored_api_payload,
+                    company_id=company_id,
                 )
 
             # cash_paid > fare_amount => diff is deposited to rider wallet
@@ -349,6 +424,7 @@ class CaramRide(models.Model):
                 accounting_date=doc_date,
                 note_from_api=api_note,
                 api_payload=stored_api_payload,
+                company_id=company_id,
             )
 
             history2 = driver_card.caram_addwallet(
@@ -370,6 +446,7 @@ class CaramRide(models.Model):
                 accounting_date=doc_date,
                 note_from_api=api_note,
                 api_payload=stored_api_payload,
+                company_id=company_id,
             )
             history1.sudo().write({
                 "order_model": "account.move",
@@ -390,6 +467,7 @@ class CaramRide(models.Model):
                 accounting_date=doc_date,
                 note_from_api=api_note,
                 api_payload=stored_api_payload,
+                company_id=company_id,
             )
             if rider_penalty_amount > 0:
                 rider_card.caram_withdraw(
@@ -403,6 +481,7 @@ class CaramRide(models.Model):
                     accounting_date=doc_date,
                     note_from_api=api_note,
                     api_payload=stored_api_payload,
+                    company_id=company_id,
                 )
 
             rider_wallet_delta = -self.fare_amount
@@ -417,6 +496,7 @@ class CaramRide(models.Model):
                     accounting_date=doc_date,
                     note_from_api=api_note,
                     api_payload=stored_api_payload,
+                    company_id=company_id,
                 )
                 history1 = rider_card.caram_withdraw(
                     wallet_paid,
@@ -429,6 +509,7 @@ class CaramRide(models.Model):
                     accounting_date=doc_date,
                     note_from_api=api_note,
                     api_payload=stored_api_payload,
+                    company_id=company_id,
                 )
                 history2 = driver_card.caram_addwallet(
                     wallet_paid,
@@ -485,6 +566,7 @@ class CaramRide(models.Model):
                     accounting_date=doc_date,
                     note_from_api=api_note,
                     api_payload=stored_api_payload,
+                    company_id=company_id,
                 )
             if rider_penalty_amount > 0:
                 rider_card.caram_withdraw(
@@ -498,6 +580,7 @@ class CaramRide(models.Model):
                     accounting_date=doc_date,
                     note_from_api=api_note,
                     api_payload=stored_api_payload,
+                    company_id=company_id,
                 )
 
             rider_wallet_delta = -wallet_paid
@@ -507,12 +590,13 @@ class CaramRide(models.Model):
             raise UserError(_("Invalid payment_mode"))
 
         if driver_type == 'external':
-            journal_entry = self._create_expense_journal_entry(
+            journal_entry = self._create_expense_bill(
                 self.driver_id,
                 float(expense_amount or 0.0),
+                company_id=self.company_id.id,
                 accounting_date=doc_date,
             )
-            card = (self.env["loyalty.card"].sudo().search( [("partner_id", "=", self.driver_id.id), ("company_id", "=", self.company_id.id)],
+            card = (self.env["loyalty.card"].sudo().search( [("partner_id", "=", self.driver_id.id)],
                     limit=1,))
             if not card:
                 raise UserError(_("Wallet not found for driver."))

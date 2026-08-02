@@ -17,6 +17,7 @@ class LoyaltyCard(models.Model):
         accounting_date=None,
         note_from_api=False,
         api_payload=False,
+        company_id=None,
     ):
         """Create & post an out_invoice for partner with provided invoice lines."""
         self.ensure_one()
@@ -29,28 +30,49 @@ class LoyaltyCard(models.Model):
         invoice = (
             self.env["account.move"]
             .sudo()
-            .with_company(self.company_id.id)
+            .with_company(company_id)
             .create(
                 {
                     "invoice_date": doc_date,
                     "date": doc_date,
                     'invoice_date_due': doc_date,
-                    "journal_id": self._get_general_journal(),
+                    "journal_id": self._get_general_journal(company_id),
                     "move_type": "out_invoice",
                     "partner_id": partner_id.id,
                     "invoice_line_ids": [(0, 0, vals) for vals in invoice_line_vals_list],
                     "is_from_api": True,
                     "note_from_api": note_from_api or False,
                     "api_payload": api_payload or False,
+                    "company_id": company_id,
                 }
             )
         )
         invoice.action_post()
         return invoice
 
-    def _prepare_commission_invoice_line_vals(self, amount):
+    def _prepare_commission_invoice_line_vals(self, amount, company_id):
         self.ensure_one()
-        commission_product = self.company_id.caram_commission_product_id
+        
+        comp_type = "commission"
+
+        config = self.env["caram.compensation.product.config"].sudo().search(
+            [("company_id", "=", company_id), ("type", "=", comp_type)],
+            limit=1,
+        )
+        # إذا مالقيتش، دور على إعداد الأب (الشركة الأم)
+        if not config:
+            config = self.env["caram.compensation.product.config"].sudo().search(
+                [("company_id", "parent_of", company_id), ("type", "=", comp_type)],
+                limit=1,
+            )
+
+        if not config or not config.product_id:
+            raise UserError(_(
+                "Compensation product not configured for type '%s' on company id '%s'."
+            ) % (comp_type, company_id))
+
+        commission_product = config.product_id.with_company(company_id)        
+        #commission_product = self.company_id.caram_commission_product_id
         if not commission_product:
             raise UserError(_("Please set commission product in the settings !"))
         return {
@@ -60,9 +82,29 @@ class LoyaltyCard(models.Model):
             "price_unit": amount,
         }
 
-    def _prepare_fine_invoice_line_vals(self, amount):
+    def _prepare_fine_invoice_line_vals(self, amount, company_id):
         self.ensure_one()
-        fine_product = self.company_id.caram_fine_product_id
+        
+        comp_type = "fine"
+
+        config = self.env["caram.compensation.product.config"].sudo().search(
+            [("company_id", "=", company_id), ("type", "=", comp_type)],
+            limit=1,
+        )
+        # إذا مالقيتش، دور على إعداد الأب (الشركة الأم)
+        if not config:
+            config = self.env["caram.compensation.product.config"].sudo().search(
+                [("company_id", "parent_of", company_id), ("type", "=", comp_type)],
+                limit=1,
+            )
+
+        if not config or not config.product_id:
+            raise UserError(_(
+                "Compensation product not configured for type '%s' on company id '%s'."
+            ) % (comp_type, company_id))
+
+        fine_product = config.product_id.with_company(company_id)         
+        #fine_product = self.company_id.caram_fine_product_id
         if not fine_product:
             raise UserError(_("Please set fine product in the settings !"))
         return {
@@ -142,6 +184,7 @@ class LoyaltyCard(models.Model):
         accounting_date=None,
         note_from_api=False,
         api_payload=False,
+        company_id=None,
     ):
         """Create an account.payment and optionally post it.
 
@@ -157,8 +200,8 @@ class LoyaltyCard(models.Model):
             [
                 ("wallet_type_id", "=", payment_method_type),
                 '|',
-                ('company_id', '=', self.company_id.id),
-                ('company_id', 'parent_of', self.company_id.id),
+                ('company_id', '=', company_id),
+                ('company_id', 'parent_of', company_id),
             ],
             limit=1,
         )
@@ -185,7 +228,7 @@ class LoyaltyCard(models.Model):
         payment = (
             self.env["account.payment"]
             .sudo()
-            .with_company(self.company_id.id)
+            .with_company(company_id)
             .create(payment_vals)
         )
         if payment and should_post:
@@ -193,12 +236,21 @@ class LoyaltyCard(models.Model):
 
         return payment, None
 
-    def _get_general_journal(self):
+    def _get_general_journal(self, company_id=None ):
         self.ensure_one()
         if self.env.context.get("caram_is_airport_trip"):
-            journal = self.company_id.caram_airport_journal_id
+            journal = self.env["account.journal"].sudo().with_company(company_id).search(
+                        [("type", "=", "sale"), ("is_airport_journal", "!=", False),
+                        '|', ('company_id', '=', company_id), 
+                        ('company_id', 'parent_of', company_id)
+                        ], limit=1
+                    )
+            #journal = self.env["account.journal"].sudo().with_company(self.company_id.id).search(
+             #                           [("type", "=", "general"), ("expense_account_id", "!=", False)],
+              #                          limit=1,
+               #                     )
             if not journal:
-                raise UserError(_("Airport journal is not configured for this company."))
+                raise UserError(_("Airport journal is not configured for this company. _get_general_journal"))
             return journal.id
         journal = self.company_id.caram_wallet_journal_id
         if journal:
@@ -239,6 +291,7 @@ class LoyaltyCard(models.Model):
         accounting_date=None,
         note_from_api=False,
         api_payload=False,
+        company_id=None,
     ): 
         self.ensure_one()
         amount = float(amount or 0.0)
@@ -253,15 +306,16 @@ class LoyaltyCard(models.Model):
         if should_invoice:
             invoice_lines = []
             if commission_amount >= 0:
-                invoice_lines.append(self._prepare_commission_invoice_line_vals(commission_amount))
+                invoice_lines.append(self._prepare_commission_invoice_line_vals(commission_amount,company_id))
             if fine_amount > 0:
-                invoice_lines.append(self._prepare_fine_invoice_line_vals(fine_amount))
+                invoice_lines.append(self._prepare_fine_invoice_line_vals(fine_amount, company_id))
             invoice = self._create_invoice_from_lines(
                 driver,
                 invoice_lines,
                 accounting_date=accounting_date,
                 note_from_api=note_from_api,
                 api_payload=api_payload,
+                company_id=company_id,
             )
         else:
             invoice = None
@@ -304,18 +358,18 @@ class LoyaltyCard(models.Model):
             
 
             # Wallet accounts from company configuration
-            rider_wallet_account = company.caram_rider_wallets_account_id
-            driver_wallet_account = company.caram_driver_wallet_account_id
+            rider_wallet_account = rider.property_account_receivable_id
+            driver_wallet_account = driver.property_account_receivable_id
+            if not rider_wallet_account or not driver_wallet_account:
+                raise UserError(_("Wallet accounts are not configured for rider or driver."))
 
-            if self.env.context.get("caram_is_airport_trip"):
-                journal = company.caram_airport_journal_id
-                if not journal:
-                    raise UserError(_("Airport journal is not configured for this company."))
-            else:
-                journal = company.caram_clearing_journal_id or self.env[
+            
+            journal = company.caram_clearing_journal_id or self.env[
                     "account.journal"
                 ].sudo().search(
-                    [("company_id", "=", company_id), ("type", "=", "general")], limit=1
+                    [("type", "=", "general"), 
+            '|', ('company_id', '=', self.company_id.id), 
+            ('company_id', 'parent_of', self.company_id.id)], limit=1
                 )
             
 
@@ -383,7 +437,7 @@ class LoyaltyCard(models.Model):
                 self.env["loyalty.card"]
                 .sudo()
                 .search(
-                    [("partner_id", "=", rider.id), ("company_id", "=", company_id)],
+                    [("partner_id", "=", rider.id)],
                     limit=1,
                 )
             )
@@ -391,7 +445,7 @@ class LoyaltyCard(models.Model):
                 self.env["loyalty.card"]
                 .sudo()
                 .search(
-                    [("partner_id", "=", driver.id), ("company_id", "=", company_id)],
+                    [("partner_id", "=", driver.id)],
                     limit=1,
                 )
             )
@@ -409,6 +463,7 @@ class LoyaltyCard(models.Model):
                     should_create_invoice=False,
                     order_model="account.move",
                     order_id=move.id,
+                    company_id=company_id,
                 )
                 driver_card.caram_addwallet(
                     base_amount,
@@ -431,6 +486,7 @@ class LoyaltyCard(models.Model):
                     should_create_invoice=False,
                     order_model="account.move",
                     order_id=move.id,
+                    company_id=company_id,
                 )
                 rider_card.caram_addwallet(
                     base_amount,
@@ -469,6 +525,7 @@ class LoyaltyCard(models.Model):
         accounting_date=None,
         note_from_api=False,
         api_payload=False,
+        company_id=None,
     ):
         self.ensure_one()
         amount = float(amount or 0.0)
@@ -488,6 +545,7 @@ class LoyaltyCard(models.Model):
                 accounting_date=accounting_date,
                 note_from_api=note_from_api,
                 api_payload=api_payload,
+                company_id=company_id,
             )
             if error:
                 raise UserError(error)
