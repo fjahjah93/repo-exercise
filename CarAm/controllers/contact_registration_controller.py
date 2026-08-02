@@ -1,8 +1,11 @@
+import traceback
+
 from odoo import fields, http, _
 from odoo.http import request
 from odoo.exceptions import UserError
 import json
-
+import logging
+_logger = logging.getLogger(__name__)
 
 class ContactRegistrationController(http.Controller):
     
@@ -185,7 +188,7 @@ class ContactRegistrationController(http.Controller):
             if mobile:
                 domain.append(('mobile', '=', mobile))
 
-            domain.append(('company_id', '=', company_id))
+            
             existing = env["res.partner"].sudo().search(domain, limit=1)
 
             if existing:
@@ -202,7 +205,7 @@ class ContactRegistrationController(http.Controller):
                     "gender": gender,
                     "contact_type": contact_type,
                     "billing_type": billing_type,
-                    "company_id": company_id,
+                    
                     "customer_rank": 1,
                     "type": "contact",
                     "user_id": user.id,
@@ -212,8 +215,7 @@ class ContactRegistrationController(http.Controller):
 
             # -------------------- Create Wallet --------------------
             program = env["loyalty.program"].sudo().search([
-                ("program_type", "=", "ewallet"),
-                ("company_id", "=", company_id),
+                ("program_type", "=", "ewallet")
             ], limit=1)
 
             if not program:
@@ -450,8 +452,7 @@ class ContactRegistrationController(http.Controller):
 
                 card = env["loyalty.card"].sudo().search(
                 [
-                    ("partner_id", "=", partner.id),
-                    ("company_id", "=", company_id),
+                    ("partner_id", "=", partner.id)
                 ],
                 limit=1,
             )
@@ -535,7 +536,7 @@ class ContactRegistrationController(http.Controller):
                     )
 
                 card = env["loyalty.card"].sudo().search(
-                    [("partner_id", "=", partner.id), ("company_id", "=", company_id)],
+                    [("partner_id", "=", partner.id)],
                     limit=1,
                 )
                 if not card:
@@ -731,6 +732,7 @@ class ContactRegistrationController(http.Controller):
                         accounting_date=accounting_date,
                         note_from_api=note_from_api,
                         api_payload=api_payload,
+                        company_id=company_id,
                     )
                     if move:
                         journal_transaction_id = move.caram_transaction_id
@@ -841,7 +843,7 @@ class ContactRegistrationController(http.Controller):
             if not partner:
                 return request.make_json_response({"error": "Partner not found"}, status=404)
 
-            wallet = env['loyalty.card'].sudo().search([('partner_id', '=', partner.id), ('company_id', '=', company_id)], limit=1)
+            wallet = env['loyalty.card'].sudo().search([('partner_id', '=', partner.id)], limit=1)
             if not wallet:
                 return request.make_json_response({"error": "No wallet found for this partner"}, status=404)
 
@@ -887,6 +889,7 @@ class ContactRegistrationController(http.Controller):
                     accounting_date=accounting_date,
                     note_from_api=note_from_api,
                     api_payload=api_payload,
+                    company_id = company_id
                 )
                 if error:
                     return request.make_json_response({"error": str(error)}, status=500)
@@ -973,7 +976,7 @@ class ContactRegistrationController(http.Controller):
                 env["loyalty.card"]
                 .sudo()
                 .search(
-                    [("partner_id", "=", partner.id), ("company_id", "parent_of", company_id)],
+                    [("partner_id", "=", partner.id)],
                     limit=1,
                 )
             )
@@ -1115,6 +1118,7 @@ class ContactRegistrationController(http.Controller):
                     accounting_date=accounting_date,
                     note_from_api=note_from_api,
                     api_payload=api_payload,
+                    company_id= company_id,
                 )
 
             # -------------------- Wallet & loyalty history --------------------
@@ -1196,8 +1200,8 @@ class ContactRegistrationController(http.Controller):
                 )
 
             # Wallet accounts from company configuration
-            rider_wallet_account = company.caram_rider_wallets_account_id
-            driver_wallet_account = company.caram_driver_wallet_account_id
+            rider_wallet_account = rider.property_account_receivable_id
+            driver_wallet_account = driver.property_account_receivable_id
             if not rider_wallet_account or not driver_wallet_account:
                 return request.make_json_response(
                     {
@@ -1285,7 +1289,7 @@ class ContactRegistrationController(http.Controller):
                 env["loyalty.card"]
                 .sudo()
                 .search(
-                    [("partner_id", "=", rider.id), ("company_id", "=", company_id)],
+                    [("partner_id", "=", rider.id)],
                     limit=1,
                 )
             )
@@ -1293,7 +1297,7 @@ class ContactRegistrationController(http.Controller):
                 env["loyalty.card"]
                 .sudo()
                 .search(
-                    [("partner_id", "=", driver.id), ("company_id", "=", company_id)],
+                    [("partner_id", "=", driver.id)],
                     limit=1,
                 )
             )
@@ -1315,6 +1319,7 @@ class ContactRegistrationController(http.Controller):
                     should_create_invoice=False,
                     order_model="account.move",
                     order_id=move.id,
+                    company_id=company_id,
                 )
                 driver_card.caram_addwallet(
                     base_amount,
@@ -1324,6 +1329,7 @@ class ContactRegistrationController(http.Controller):
                     should_create_payment=False,
                     order_model="account.move",
                     order_id=move.id,
+                    company_id=company_id,
                 )
             else:
                 # driver.wallet -= amount_abs, rider.wallet += amount_abs
@@ -1337,6 +1343,7 @@ class ContactRegistrationController(http.Controller):
                     should_create_invoice=False,
                     order_model="account.move",
                     order_id=move.id,
+                    company_id=company_id,
                 )
                 rider_card.caram_addwallet(
                     base_amount,
@@ -1346,6 +1353,7 @@ class ContactRegistrationController(http.Controller):
                     should_create_payment=False,
                     order_model="account.move",
                     order_id=move.id,
+                    company_id=company_id,
                 )
 
             response = {
@@ -1464,11 +1472,11 @@ class ContactRegistrationController(http.Controller):
                     is_airport_trip=is_airport_trip,
                     driver_type=driver_type,
                     expense_amount=expense_amount,
+                    company_id=company_id,
                 )
                 if coupon_value>0:
                     # Wallet
-                    card = (env["loyalty.card"].sudo().search( [("partner_id", "=", driver.id), ("company_id", "=", company_id)],
-                    limit=1,))
+                    card = (env["loyalty.card"].sudo().search( [("partner_id", "=", driver.id)], limit=1))
                     if not card:
                         return request.make_json_response(
                             {"status": 404, "message": "Wallet not found for this partner"}, status=404
@@ -1521,4 +1529,6 @@ class ContactRegistrationController(http.Controller):
             return request.make_json_response(result, status=200)
 
         except Exception as e:
+            import traceback
+            _logger.error(traceback.format_exc())
             return request.make_json_response({"error": f"Failed to pay ride: {str(e)}"}, status=500)
